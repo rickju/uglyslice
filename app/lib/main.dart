@@ -102,30 +102,34 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Four Celsius'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.scoreboard),
-            onPressed: () {
-              if (_golfCourse != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ScorecardPage(
-                      golfCourse: _golfCourse!,
-                      scorecard: _scorecard,
-                      onScoreChanged: (holeIndex, newScore) {
-                        setState(() {
-                          _scorecard.setScore(holeIndex, newScore);
-                        });
-                      },
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (_golfCourse != null && _golfCourse!.holes.isNotEmpty)
+              Text('Hole ${_golfCourse!.holes[_currentHoleIndex].holeNumber}'),
+            IconButton(
+              icon: const Icon(Icons.scoreboard),
+              onPressed: () {
+                if (_golfCourse != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ScorecardPage(
+                        golfCourse: _golfCourse!,
+                        scorecard: _scorecard,
+                        onScoreChanged: (holeIndex, newScore) {
+                          setState(() {
+                            _scorecard.setScore(holeIndex, newScore);
+                          });
+                        },
+                      ),
                     ),
-                  ),
-                );
-              }
-            },
-          ),
-        ],
+                  );
+                }
+              },
+            ),
+          ],
+        ),
       ),
       body: Stack(
         children: [
