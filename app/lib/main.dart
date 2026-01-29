@@ -19,6 +19,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
   LatLng? _currentPalyerPos;
   GolfCourse? _golfCourse;
   int _currentHoleIndex = 0;
+  LatLng? _selectedTee;
   final MapController _mapController = MapController();
 
   @override
@@ -33,6 +34,11 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
     setState(() {
       _golfCourse = GolfCourse.fromJson(data);
       print('Golf course loaded with ${_golfCourse!.holes.length} holes.');
+      if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _fitMapToHoleView(0);
+        });
+      }
     });
   }
 
@@ -54,9 +60,16 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
     Geolocator.getPositionStream(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
     ).listen((Position position) {
+      final newPos = LatLng(position.latitude, position.longitude);
       setState(() {
-        _currentPalyerPos = LatLng(position.latitude, position.longitude);
+        _currentPalyerPos = newPos;
       });
+
+      if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+        final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+        final bearing = const Distance().bearing(newPos, targetGreen);
+        _mapController.rotate(-bearing);
+      }
     });
   }
 
@@ -82,7 +95,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _golfCourse != null && _golfCourse!.holes.isNotEmpty ? _golfCourse!.holes[0].pin : const LatLng(-41.2895, 174.6938),
+              initialCenter: const LatLng(-41.2895, 174.6938),
               initialZoom: 16.0,
             ),
             children: [
@@ -120,7 +133,19 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                       point: tee,
                       width: 40,
                       height: 40,
-                      child: const Icon(Icons.location_on, color: Colors.red, size: 30),
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedTee = tee;
+                          });
+                          _fitMapToHole();
+                        },
+                        child: Icon(
+                          Icons.location_on,
+                          color: _selectedTee == tee ? Colors.purple : Colors.red,
+                          size: 30,
+                        ),
+                      ),
                     ),
                 ]),
             ],
@@ -146,7 +171,8 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                         setState(() {
                           if (_currentHoleIndex > 0) {
                             _currentHoleIndex--;
-                            _mapController.move(_golfCourse!.holes[_currentHoleIndex].pin, 16.0);
+                            _selectedTee = null;
+                            _fitMapToHoleView(_currentHoleIndex);
                           }
                         });
                       },
@@ -161,7 +187,8 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                         setState(() {
                           if (_currentHoleIndex < _golfCourse!.holes.length - 1) {
                             _currentHoleIndex++;
-                            _mapController.move(_golfCourse!.holes[_currentHoleIndex].pin, 16.0);
+                            _selectedTee = null;
+                            _fitMapToHoleView(_currentHoleIndex);
                           }
                         });
                       },
@@ -198,10 +225,10 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Distance to nearest tee', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      const Text('Tee to Pin', style: TextStyle(color: Colors.white70, fontSize: 16)),
                       Text(
-                        _getDistanceToNearestTee(),
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 24, fontWeight: FontWeight.bold),
+                        _getDistanceTeeToPin(),
+                        style: const TextStyle(color: Colors.amber, fontSize: 24, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -214,8 +241,10 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
       // 快速回到自己位置的按钮
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          if (_currentPalyerPos != null) {
-            _mapController.move(_currentPalyerPos!, 16.0);
+          if (_currentPalyerPos != null && _golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+            final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+            final bearing = const Distance().bearing(_currentPalyerPos!, targetGreen);
+            _mapController.moveAndRotate(_currentPalyerPos!, 16.0, -bearing);
           }
         },
         child: const Icon(Icons.gps_fixed),
@@ -260,6 +289,63 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
     int distanceInYards = (minDistance * 1.09361).round();
     return '$distanceInYards YDS';
+  }
+
+  String _getDistanceTeeToPin() {
+    if (_selectedTee == null || _golfCourse == null || _golfCourse!.holes.isEmpty) {
+      return "N/A";
+    }
+
+    final pin = _golfCourse!.holes[_currentHoleIndex].pin;
+    double meters = const Distance().as(LengthUnit.Meter, _selectedTee!, pin);
+    int distanceInYards = (meters * 1.09361).round();
+    return '$distanceInYards YDS';
+  }
+
+  void _fitMapToHole() {
+    if (_selectedTee == null || _golfCourse == null || _golfCourse!.holes.isEmpty) {
+      return;
+    }
+
+    final pin = _golfCourse!.holes[_currentHoleIndex].pin;
+    final bounds = LatLngBounds.fromPoints([_selectedTee!, pin]);
+    _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
+  }
+
+  void _fitMapToHoleView(int holeIndex) {
+    if (_golfCourse == null || _golfCourse!.holes.isEmpty) return;
+
+    final hole = _golfCourse!.holes[holeIndex];
+    final points = [hole.pin, ...hole.tees];
+
+    if (points.isEmpty) {
+      _mapController.move(hole.pin, 16);
+      return;
+    }
+
+    final bounds = LatLngBounds.fromPoints(points);
+
+    LatLng centerOfTees;
+    if (hole.tees.isNotEmpty) {
+      double totalLat = 0;
+      double totalLng = 0;
+      for (var tee in hole.tees) {
+        totalLat += tee.latitude;
+        totalLng += tee.longitude;
+      }
+      centerOfTees = LatLng(totalLat / hole.tees.length, totalLng / hole.tees.length);
+    } else {
+      // if no tees, center on pin without rotation
+      _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
+      return;
+    }
+    
+    final bearing = const Distance().bearing(centerOfTees, hole.pin);
+
+    _mapController.fitCamera(
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
+    );
+    _mapController.rotate(-bearing);
   }
 }
 
