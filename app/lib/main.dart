@@ -111,6 +111,18 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                     child: const Icon(Icons.my_location, color: Colors.blue, size: 30),
                   ),
                 ]),
+
+              // 梯台位置标记
+              if (_golfCourse != null && _golfCourse!.holes.isNotEmpty)
+                MarkerLayer(markers: [
+                  for (var tee in _golfCourse!.holes[_currentHoleIndex].tees)
+                    Marker(
+                      point: tee,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.location_on, color: Colors.red, size: 30),
+                    ),
+                ]),
             ],
           ),
           // Hole selection UI
@@ -170,13 +182,28 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                 color: Colors.black87,
                 borderRadius: BorderRadius.circular(15),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
                 children: [
-                  const Text('Distance to green center', style: TextStyle(color: Colors.white70, fontSize: 16)),
-                  Text(
-                    _currentPalyerPos == null ? "Locating..." : '$distanceInYards YDS',
-                    style: const TextStyle(color: Colors.greenAccent, fontSize: 36, fontWeight: FontWeight.bold),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Distance to green center', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      Text(
+                        _currentPalyerPos == null ? "Locating..." : '$distanceInYards YDS',
+                        style: const TextStyle(color: Colors.greenAccent, fontSize: 36, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Distance to nearest tee', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      Text(
+                        _getDistanceToNearestTee(),
+                        style: const TextStyle(color: Colors.redAccent, fontSize: 24, fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -211,6 +238,28 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
       default:
         return Colors.grey.withOpacity(0.5);
     }
+  }
+
+  String _getDistanceToNearestTee() {
+    if (_currentPalyerPos == null || _golfCourse == null || _golfCourse!.holes.isEmpty) {
+      return "N/A";
+    }
+
+    final tees = _golfCourse!.holes[_currentHoleIndex].tees;
+    if (tees.isEmpty) {
+      return "N/A";
+    }
+
+    double minDistance = double.infinity;
+    for (var tee in tees) {
+      double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, tee);
+      if (meters < minDistance) {
+        minDistance = meters;
+      }
+    }
+
+    int distanceInYards = (minDistance * 1.09361).round();
+    return '$distanceInYards YDS';
   }
 }
 

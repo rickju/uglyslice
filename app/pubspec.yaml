@@ -34,12 +34,12 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  flutter_map_cancellable_tile_provider: ^2.0.0
+
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_map: ^6.1.0          # 地图引擎
+  flutter_map: ^8.2.2          # 地图引擎
   latlong2: ^0.9.0             # 经纬度计算
   geolocator: ^10.1.0          # 获取 GPS 位置
 
