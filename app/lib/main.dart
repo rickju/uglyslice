@@ -1,10 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:golf_track_app/models/golf_course.dart';
+import 'package:golf_track_app/models/scorecard.dart';
+import 'package:golf_track_app/scorecard_page.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 void main() => runApp(const MaterialApp(home: GolfPhaseOne()));
 
@@ -20,7 +24,9 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
   GolfCourse? _golfCourse;
   int _currentHoleIndex = 0;
   LatLng? _selectedTee;
+  LatLng? _rulerTarget;
   final MapController _mapController = MapController();
+  final Scorecard _scorecard = Scorecard();
 
   @override
   void initState() {
@@ -44,33 +50,40 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
   /// 获取并监听用户实时位置
   Future<void> _determinePosition() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+    if (kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+      bool serviceEnabled;
+      LocationPermission permission;
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return;
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
 
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
-    }
-
-    // 持续监听位置变化
-    Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    ).listen((Position position) {
-      final newPos = LatLng(position.latitude, position.longitude);
-      setState(() {
-        _currentPalyerPos = newPos;
-      });
-
-      if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
-        final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
-        final bearing = const Distance().bearing(newPos, targetGreen);
-        _mapController.rotate(-bearing);
+      permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
       }
-    });
+
+      // 持续监听位置变化
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).listen((Position position) {
+        final newPos = LatLng(position.latitude, position.longitude);
+        setState(() {
+          _currentPalyerPos = newPos;
+        });
+
+        if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+          final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+          final bearing = const Distance().bearing(newPos, targetGreen);
+          _mapController.rotate(-bearing);
+        }
+      });
+    } else {
+      // Set a default location for unsupported platforms
+      setState(() {
+        _currentPalyerPos = const LatLng(-41.2866, 174.7772); // Wellington, NZ
+      });
+    }
   }
 
   @override
@@ -88,7 +101,32 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Four Celsius')),
+      appBar: AppBar(
+        title: const Text('Four Celsius'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.scoreboard),
+            onPressed: () {
+              if (_golfCourse != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ScorecardPage(
+                      golfCourse: _golfCourse!,
+                      scorecard: _scorecard,
+                      onScoreChanged: (holeIndex, newScore) {
+                        setState(() {
+                          _scorecard.setScore(holeIndex, newScore);
+                        });
+                      },
+                    ),
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           // 1. 地图视图
@@ -97,6 +135,9 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
             options: MapOptions(
               initialCenter: const LatLng(-41.2895, 174.6938),
               initialZoom: 16.0,
+              onTap: (tapPosition, point) => setState(() {
+                _rulerTarget = point;
+              }),
             ),
             children: [
               // 使用 OpenStreetMap 数据源
@@ -147,6 +188,17 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                         ),
                       ),
                     ),
+                ]),
+
+              // Ruler Target Marker
+              if (_rulerTarget != null)
+                MarkerLayer(markers: [
+                  Marker(
+                    point: _rulerTarget!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(Icons.location_pin, color: Colors.orange, size: 30),
+                  ),
                 ]),
             ],
           ),
@@ -214,7 +266,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Distance to green center', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      const Expanded(child: Text('Distance to green center', style: TextStyle(color: Colors.white70, fontSize: 16))),
                       Text(
                         _currentPalyerPos == null ? "Locating..." : '$distanceInYards YDS',
                         style: const TextStyle(color: Colors.greenAccent, fontSize: 36, fontWeight: FontWeight.bold),
@@ -222,10 +274,30 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                     ],
                   ),
                   const SizedBox(height: 10),
+                  if (_rulerTarget != null)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Expanded(child: Text('Distance to Target', style: TextStyle(color: Colors.white70, fontSize: 16))),
+                        Text(
+                          _getDistanceToRulerTarget(),
+                          style: const TextStyle(color: Colors.orangeAccent, fontSize: 24, fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.white),
+                          onPressed: () {
+                            setState(() {
+                              _rulerTarget = null;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Tee to Pin', style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      const Expanded(child: Text('Tee to Pin', style: TextStyle(color: Colors.white70, fontSize: 16))),
                       Text(
                         _getDistanceTeeToPin(),
                         style: const TextStyle(color: Colors.amber, fontSize: 24, fontWeight: FontWeight.bold),
@@ -298,6 +370,16 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
     final pin = _golfCourse!.holes[_currentHoleIndex].pin;
     double meters = const Distance().as(LengthUnit.Meter, _selectedTee!, pin);
+    int distanceInYards = (meters * 1.09361).round();
+    return '$distanceInYards YDS';
+  }
+
+  String _getDistanceToRulerTarget() {
+    if (_rulerTarget == null || _currentPalyerPos == null) {
+      return "N/A";
+    }
+
+    double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, _rulerTarget!);
     int distanceInYards = (meters * 1.09361).round();
     return '$distanceInYards YDS';
   }
