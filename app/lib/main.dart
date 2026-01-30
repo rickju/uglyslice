@@ -9,11 +9,22 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'package:golf_track_app/course_selection_page.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
-void main() => runApp(const MaterialApp(home: GolfPhaseOne()));
+void main() => runApp(MaterialApp(
+  initialRoute: '/',
+  routes: {
+    '/': (context) => const CourseSelectionPage(),
+    '/map': (context) => const GolfPhaseOne(),
+  },
+));
 
 class GolfPhaseOne extends StatefulWidget {
-  const GolfPhaseOne({super.key});
+  final Map<String, dynamic>? selectedCourse;
+  const GolfPhaseOne({super.key, this.selectedCourse});
 
   @override
   State<GolfPhaseOne> createState() => _GolfPhaseOneState();
@@ -33,11 +44,15 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
   void initState() {
     super.initState();
     _determinePosition();
-    _loadGolfCourse();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final courseData = ModalRoute.of(context)!.settings.arguments as String?;
+      if (courseData != null) {
+        _loadGolfCourse(courseData);
+      }
+    });
   }
 
-  Future<void> _loadGolfCourse() async {
-    final String data = await rootBundle.loadString('karori_golf.json');
+  Future<void> _loadGolfCourse(String data) async {
     setState(() {
       _golfCourse = GolfCourse.fromJson(data);
       print('Golf course loaded with ${_golfCourse!.holes.length} holes.');
@@ -47,6 +62,38 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
         });
       }
     });
+  }
+
+  Future<void> _downloadCourseData() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Downloading course data...')),
+    );
+
+    try {
+      final String query = await rootBundle.loadString('karori_query.ql');
+      final response = await http.post(
+        Uri.parse('https://overpass-api.de/api/interpreter'),
+        body: query,
+      );
+
+      if (response.statusCode == 200) {
+        final directory = await getApplicationDocumentsDirectory();
+        final path = '${directory.path}/karori_golf.json';
+        final file = File(path);
+        await file.writeAsString(response.body);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Download complete! Reloading map...')),
+        );
+        _loadGolfCourse(response.body); // Reload the course
+      } else {
+        throw Exception('Failed to load course data');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: $e')),
+      );
+    }
   }
 
   /// 获取并监听用户实时位置
@@ -135,6 +182,19 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                 );
               }
             },
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'download') {
+                await _downloadCourseData();
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'download',
+                child: Text('Download Course Data'),
+              ),
+            ],
           ),
         ],
       ),
