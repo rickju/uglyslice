@@ -9,136 +9,225 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'package:golf_track_app/course_selection_page.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
-void main() => runApp(const MaterialApp(home: GolfPhaseOne()));
+void main() => runApp(MaterialApp(
+  initialRoute: '/',
+  routes: {
+    '/': (context) => const CourseSelectionPage(),
+    '/map': (context) => const GolfPhaseOne(),
+  },
+));
 
 class GolfPhaseOne extends StatefulWidget {
-  const GolfPhaseOne({super.key});
+  final Map<String, dynamic>? selectedCourse;
+  const GolfPhaseOne({super.key, this.selectedCourse});
 
   @override
-  State<GolfPhaseOne> createState() => _GolfPhaseOneState();
-}
-
-class _GolfPhaseOneState extends State<GolfPhaseOne> {
-  LatLng? _currentPalyerPos;
-  GolfCourse? _golfCourse;
-  int _currentHoleIndex = 0;
-  LatLng? _selectedTee;
-  LatLng? _rulerTarget;
-  bool _isSatellite = false;
-  final MapController _mapController = MapController();
-  final Scorecard _scorecard = Scorecard();
-
-  @override
-  void initState() {
-    super.initState();
-    _determinePosition();
-    _loadGolfCourse();
+    State<GolfPhaseOne> createState() => _GolfPhaseOneState();
   }
-
-  Future<void> _loadGolfCourse() async {
-    final String data = await rootBundle.loadString('karori_golf.json');
-    setState(() {
-      _golfCourse = GolfCourse.fromJson(data);
-      print('Golf course loaded with ${_golfCourse!.holes.length} holes.');
-      if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _fitMapToHoleView(0);
-        });
-      }
-    });
-  }
-
-  /// 获取并监听用户实时位置
-  Future<void> _determinePosition() async {
-    if (kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      bool serviceEnabled;
-      LocationPermission permission;
-
-      serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return;
-
-      permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) return;
-      }
-
-      // 持续监听位置变化
-      Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      ).listen((Position position) {
-        final newPos = LatLng(position.latitude, position.longitude);
-        setState(() {
-          _currentPalyerPos = newPos;
-        });
-
-        if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
-          final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
-          final bearing = const Distance().bearing(newPos, targetGreen);
-          _mapController.rotate(-bearing);
+  
+  class _GolfPhaseOneState extends State<GolfPhaseOne> {
+    LatLng? _currentPalyerPos;
+    GolfCourse? _golfCourse;
+    int _currentHoleIndex = 0;
+    LatLng? _selectedTee;
+    LatLng? _rulerTarget;
+    bool _isSatellite = false;
+    final MapController _mapController = MapController();
+    final Scorecard _scorecard = Scorecard();
+  
+    @override
+    void initState() {
+      super.initState();
+      _determinePosition();
+      _loadGolfCourse();
+    }
+  
+    Future<void> _loadGolfCourse() async {
+      String data;
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        // First, try to load the dynamically selected course.
+        final selectedPath = '${directory.path}/selected_course.json';
+        final selectedFile = File(selectedPath);
+  
+        if (await selectedFile.exists()) {
+          print("Loading course data from selected_course.json.");
+          data = await selectedFile.readAsString();
+          // Clear the selected course file so it doesn't load next time by default
+          await selectedFile.delete();
+        } else {
+          // Fallback to the downloaded Karori file
+          final karoriPath = '${directory.path}/karori_golf.json';
+          final karoriFile = File(karoriPath);
+          if (await karoriFile.exists()) {
+            print("Loading course data from local karori_golf.json.");
+            data = await karoriFile.readAsString();
+          } else {
+            // Fallback to the asset
+            print("Loading course data from assets.");
+            data = await rootBundle.loadString('karori_golf.json');
+          }
         }
-      });
-    } else {
-      // Set a default location for unsupported platforms
-      setState(() {
-        _currentPalyerPos = const LatLng(-41.2866, 174.7772); // Wellington, NZ
-      });
+  
+        setState(() {
+          _golfCourse = GolfCourse.fromJson(data);
+          print('Golf course loaded with ${_golfCourse!.holes.length} holes.');
+          if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _fitMapToHoleView(0);
+            });
+          }
+        });
+      } catch (e) {
+        print("Error loading golf course: $e");
+      }
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // 计算距离（米转码）
-    int distanceInYards = 0;
-    LatLng? targetGreen;
-    if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
-      targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+  
+    Future<void> _downloadCourseData() async {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Downloading course data...')),
+      );
+  
+      try {
+        final String query = await rootBundle.loadString('karori_query.ql');
+        final response = await http.post(
+          Uri.parse('https://overpass-api.de/api/interpreter'),
+          body: query,
+        );
+  
+        if (response.statusCode == 200) {
+          final directory = await getApplicationDocumentsDirectory();
+          final path = '${directory.path}/karori_golf.json';
+          final file = File(path);
+          await file.writeAsString(response.body);
+  
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Download complete! Reloading map...')),
+          );
+          _loadGolfCourse(); // Reload the course
+        } else {
+          throw Exception('Failed to load course data');
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e')),
+        );
+      }
     }
-    
-    if (_currentPalyerPos != null && targetGreen != null) {
-      double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, targetGreen);
-      distanceInYards = (meters * 1.09361).round();
+  
+    /// 获取并监听用户实时位置
+    Future<void> _determinePosition() async {
+      if (kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+        bool serviceEnabled;
+        LocationPermission permission;
+  
+        serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) return;
+  
+        permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          if (permission == LocationPermission.denied) return;
+        }
+  
+        // 持续监听位置变化
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        ).listen((Position position) {
+          final newPos = LatLng(position.latitude, position.longitude);
+          setState(() {
+            _currentPalyerPos = newPos;
+          });
+  
+          if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+            final targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+            final bearing = const Distance().bearing(newPos, targetGreen);
+            _mapController.rotate(-bearing);
+          }
+        });
+      } else {
+        // Set a default location for unsupported platforms
+        setState(() {
+          _currentPalyerPos = const LatLng(-41.2866, 174.7772); // Wellington, NZ
+        });
+      }
     }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_golfCourse != null && _golfCourse!.holes.isNotEmpty
-            ? 'Hole ${_golfCourse!.holes[_currentHoleIndex].holeNumber}'
-            : 'Golf App'),
-        actions: [
-          IconButton(
-            icon: Icon(_isSatellite ? Icons.map : Icons.satellite),
-            onPressed: () {
-              setState(() {
-                _isSatellite = !_isSatellite;
-              });
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.scoreboard),
-            onPressed: () {
-              if (_golfCourse != null) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ScorecardPage(
-                      golfCourse: _golfCourse!,
-                      scorecard: _scorecard,
-                      onScoreChanged: (holeIndex, newScore) {
-                        setState(() {
-                          _scorecard.setScore(holeIndex, newScore);
-                        });
-                      },
+  
+    @override
+    Widget build(BuildContext context) {
+      // 计算距离（米转码）
+      int distanceInYards = 0;
+      LatLng? targetGreen;
+      if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
+        targetGreen = _golfCourse!.holes[_currentHoleIndex].pin;
+      }
+  
+      if (_currentPalyerPos != null && targetGreen != null) {
+        double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, targetGreen);
+        distanceInYards = (meters * 1.09361).round();
+      }
+  
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(_golfCourse != null && _golfCourse!.holes.isNotEmpty
+              ? 'Hole ${_golfCourse!.holes[_currentHoleIndex].holeNumber}'
+              : 'Golf App'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: () {
+                Navigator.pushNamed(context, '/');
+              },
+            ),
+            IconButton(
+              icon: Icon(_isSatellite ? Icons.map : Icons.satellite),
+              onPressed: () {
+                setState(() {
+                  _isSatellite = !_isSatellite;
+                });
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.scoreboard),
+              onPressed: () {
+                if (_golfCourse != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ScorecardPage(
+                        golfCourse: _golfCourse!,
+                        scorecard: _scorecard,
+                        onScoreChanged: (holeIndex, newScore) {
+                          setState(() {
+                            _scorecard.setScore(holeIndex, newScore);
+                          });
+                        },
+                      ),
                     ),
-                  ),
-                );
-              }
-            },
-          ),
-        ],
-      ),
-      body: Stack(
+                  );
+                }
+              },
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) async {
+                if (value == 'download') {
+                  await _downloadCourseData();
+                }
+              },
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'download',
+                  child: Text('Download Karori Course'),
+                ),
+              ],
+            ),
+          ],
+        ),      body: Stack(
         children: [
           // 1. 地图视图
           FlutterMap(
