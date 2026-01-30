@@ -25,6 +25,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
   int _currentHoleIndex = 0;
   LatLng? _selectedTee;
   LatLng? _rulerTarget;
+  bool _isSatellite = false;
   final MapController _mapController = MapController();
   final Scorecard _scorecard = Scorecard();
 
@@ -102,34 +103,40 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            if (_golfCourse != null && _golfCourse!.holes.isNotEmpty)
-              Text('Hole ${_golfCourse!.holes[_currentHoleIndex].holeNumber}'),
-            IconButton(
-              icon: const Icon(Icons.scoreboard),
-              onPressed: () {
-                if (_golfCourse != null) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ScorecardPage(
-                        golfCourse: _golfCourse!,
-                        scorecard: _scorecard,
-                        onScoreChanged: (holeIndex, newScore) {
-                          setState(() {
-                            _scorecard.setScore(holeIndex, newScore);
-                          });
-                        },
-                      ),
+        title: Text(_golfCourse != null && _golfCourse!.holes.isNotEmpty
+            ? 'Hole ${_golfCourse!.holes[_currentHoleIndex].holeNumber}'
+            : 'Golf App'),
+        actions: [
+          IconButton(
+            icon: Icon(_isSatellite ? Icons.map : Icons.satellite),
+            onPressed: () {
+              setState(() {
+                _isSatellite = !_isSatellite;
+              });
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.scoreboard),
+            onPressed: () {
+              if (_golfCourse != null) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ScorecardPage(
+                      golfCourse: _golfCourse!,
+                      scorecard: _scorecard,
+                      onScoreChanged: (holeIndex, newScore) {
+                        setState(() {
+                          _scorecard.setScore(holeIndex, newScore);
+                        });
+                      },
                     ),
-                  );
-                }
-              },
-            ),
-          ],
-        ),
+                  ),
+                );
+              }
+            },
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -146,7 +153,9 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
             children: [
               // 使用 OpenStreetMap 数据源
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: _isSatellite
+                    ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                    : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.golfapp',
               ),
               if (_golfCourse != null)
