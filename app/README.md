@@ -27,11 +27,11 @@ Road Map
 
 第三阶段：交互功能
 
-    记分卡Scorecard:使  用 ListView 或 Table 组件记录每洞杆数
-    测距/Ruler： 允许用户在地图上点击任意一点，计算到该点的距离.....避开沙坑...
+    Feature/记分卡/Scorecard: ListView/Table记录每洞杆数
+    Feature/测距/Ruler： 允许用户在地图上点击任意一点，计算到该点的距离.....避开沙坑...
 
 
-第四阶段：优化
+第四阶段: 优化
 
     离线地图：使用 flutter_map_mbtiles 缓存地图数据，防止球场信号不好
     风向显示：集成气象 API，显示实时风向和风速
@@ -43,15 +43,17 @@ Android watch support
     Add feature: integrate android watch support: UI. show current hole info: par3/4/5, distance to green.
     Add feature: integrate android watch support: use IMU to sense a swing.....
 
+
 UI 
 -----------
 
-Add feature: 'Round page': play or review a round 
 Add feature:  Bottom Nav Bar: 'Play', 'Scorecards', 'Settings'
 
-          'Play' Page: 1. select a golf course. 2. select tee 'white/black/red'.....   3. show course map tee #1
-    'Scorecards' Page: show a list of history scores. click an item. show the course map tee #1
+         'Round page': play or review a round. show course/hole map
+          'Play' Page: 1. select a golf course. 2. select tee 'white/black/red'.....   3. show 'Round' page
+    'Scorecards' Page: show a list of history scores. when an item/round is clicked, show 'Round' page
       'Settings' Page: personal info: avatar/name/email/sex/age/handicap/home club, target handicap.
+
 
 
 data structure:
