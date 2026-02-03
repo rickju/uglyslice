@@ -13,14 +13,12 @@ import 'package:golf_track_app/course_selection_page.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'main_screen.dart';
+import 'models/course_parser.dart';
 
-void main() => runApp(MaterialApp(
-  initialRoute: '/',
-  routes: {
-    '/': (context) => const CourseSelectionPage(),
-    '/map': (context) => const GolfPhaseOne(),
-  },
-));
+void main() => runApp(const MaterialApp(
+      home: MainScreen(),
+    ));
 
 class GolfPhaseOne extends StatefulWidget {
   final Map<String, dynamic>? selectedCourse;
@@ -54,7 +52,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
   Future<void> _loadGolfCourse(String data) async {
     setState(() {
-      _golfCourse = GolfCourse.fromJson(data);
+      _golfCourse = CourseParser.fromJson(data);
       print('Golf course loaded with ${_golfCourse!.holes.length} holes.');
       if (_golfCourse != null && _golfCourse!.holes.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -244,19 +242,19 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
                 MarkerLayer(markers: [
                   for (var tee in _golfCourse!.holes[_currentHoleIndex].tees)
                     Marker(
-                      point: tee,
+                      point: tee.position,
                       width: 40,
                       height: 40,
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            _selectedTee = tee;
+                            _selectedTee = tee.position;
                           });
                           _fitMapToHole();
                         },
                         child: Icon(
                           Icons.location_on,
-                          color: _selectedTee == tee ? Colors.purple : Colors.red,
+                          color: _selectedTee == tee.position ? Colors.purple : Colors.red,
                           size: 30,
                         ),
                       ),
@@ -426,7 +424,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
 
     double minDistance = double.infinity;
     for (var tee in tees) {
-      double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, tee);
+      double meters = const Distance().as(LengthUnit.Meter, _currentPalyerPos!, tee.position);
       if (meters < minDistance) {
         minDistance = meters;
       }
@@ -471,7 +469,7 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
     if (_golfCourse == null || _golfCourse!.holes.isEmpty) return;
 
     final hole = _golfCourse!.holes[holeIndex];
-    final points = [hole.pin, ...hole.tees];
+    final points = [hole.pin, ...hole.tees.map((t) => t.position)];
 
     if (points.isEmpty) {
       _mapController.move(hole.pin, 16);
@@ -485,8 +483,8 @@ class _GolfPhaseOneState extends State<GolfPhaseOne> {
       double totalLat = 0;
       double totalLng = 0;
       for (var tee in hole.tees) {
-        totalLat += tee.latitude;
-        totalLng += tee.longitude;
+        totalLat += tee.position.latitude;
+        totalLng += tee.position.longitude;
       }
       centerOfTees = LatLng(totalLat / hole.tees.length, totalLng / hole.tees.length);
     } else {

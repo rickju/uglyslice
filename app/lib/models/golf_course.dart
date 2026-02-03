@@ -6,12 +6,14 @@ class Tee {
   final double distance;
   final double courseRating;
   final double slopeRating;
+  final LatLng position;
 
   Tee({
     required this.color,
     this.distance = 0.0,
     this.courseRating = 0.0,
     this.slopeRating = 0.0,
+    required this.position,
   });
 }
 
@@ -54,6 +56,7 @@ class Hole {
         final tee = Tee(
           color: node.tags['tee'] ?? 'white',
           distance: double.parse(node.tags['distance'] ?? '0'),
+          position: node.toLatLng(),
         );
         tees.add(tee);
       }

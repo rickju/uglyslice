@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'models/golf_course.dart';
+import 'models/course_parser.dart';
 
 class CourseSelectionPage extends StatefulWidget {
-  const CourseSelectionPage({super.key});
+  final Function(GolfCourse)? onCourseSelected;
+
+  const CourseSelectionPage({super.key, this.onCourseSelected});
 
   @override
   _CourseSelectionPageState createState() => _CourseSelectionPageState();
@@ -119,6 +123,10 @@ out skel qt;
                             );
 
                             if (response.statusCode == 200) {
+                              final golfCourse = CourseParser.fromJson(response.body);
+                              if (widget.onCourseSelected != null) {
+                                widget.onCourseSelected!(golfCourse);
+                              }
                               // Navigate to the map page with the downloaded data
                               Navigator.pushNamed(context, '/map', arguments: response.body);
                             } else {
