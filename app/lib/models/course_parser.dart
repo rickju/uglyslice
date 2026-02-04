@@ -3,7 +3,7 @@ import 'package:latlong2/latlong.dart';
 import 'golf_course.dart';
 
 class CourseParser {
-  static GolfCourse fromJson(String jsonString) {
+  static GolfCourse fromJson(String jsonString, String courseName) {
     final Map<String, dynamic> data = json.decode(jsonString);
     final List<dynamic> elements = data['elements'];
 
@@ -23,11 +23,9 @@ class CourseParser {
     final List<Way> features = [];
     final List<Hole> holes = [];
 
-    // Create a dummy GolfCourse to pass to Hole.fromWay initially
-    // This allows Hole.fromWay to access all nodes via golfCourse.nodes
     final GolfCourse dummyGolfCourse = GolfCourse(
       id: '',
-      name: '',
+      name: courseName, // Use passed name
       location: LatLng(0, 0),
       holes: [],
       nodes: nodes,
@@ -50,21 +48,11 @@ class CourseParser {
 
     holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
 
-    // Extract course name and other details from the data
-    String courseName = "Unknown Course";
-    if (data['elements'] != null && data['elements'].isNotEmpty) {
-      var courseElement = data['elements'].firstWhere(
-        (e) => e['tags'] != null && e['tags']['golf'] == 'course',
-        orElse: () => null,
-      );
-      if (courseElement != null) {
-        courseName = courseElement['tags']['name'] ?? "Unknown Course";
-      }
-    }
+    // The logic to find the name is removed. We trust the passed 'courseName'.
 
     return GolfCourse(
       id: "course_${DateTime.now().millisecondsSinceEpoch}",
-      name: courseName,
+      name: courseName, // Use passed name
       location: LatLng(0, 0), // Placeholder
       holes: holes,
       features: features,

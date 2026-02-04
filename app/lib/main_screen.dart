@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'play_page.dart';
 import 'scorecard_page.dart';
 import 'settings_page.dart';
-import 'models/golf_course.dart';
+import 'models/round.dart';
 import 'models/scorecard.dart';
+import 'round_page.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,21 +16,30 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final Scorecard _scorecard = Scorecard();
-  GolfCourse? _golfCourse;
+  Round? _currentRound;
 
-  void _onCourseSelected(GolfCourse course) {
+  void _startRound(Round round) {
     setState(() {
-      _golfCourse = course;
+      _currentRound = round;
+      _selectedIndex = 0; // Switch to the "Play" tab to show the round
     });
+  }
+
+  Widget _buildPlayPage() {
+    if (_currentRound != null) {
+      return RoundPage(round: _currentRound!);
+    } else {
+      return PlayPage(onRoundStarted: _startRound);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final List<Widget> widgetOptions = <Widget>[
-      PlayPage(onCourseSelected: _onCourseSelected),
-      _golfCourse != null
+      _buildPlayPage(),
+      _currentRound != null
           ? ScorecardPage(
-              golfCourse: _golfCourse!,
+              golfCourse: _currentRound!.course,
               scorecard: _scorecard,
               onScoreChanged: (hole, score) {
                 setState(() {
@@ -39,7 +49,7 @@ class _MainScreenState extends State<MainScreen> {
             )
           : Scaffold(
               appBar: AppBar(title: const Text('Scorecard')),
-              body: const Center(child: Text('Please select a course first from the Play tab.'))),
+              body: const Center(child: Text('Please start a round from the Play tab.'))),
       const SettingsPage(),
     ];
 

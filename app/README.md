@@ -15,14 +15,20 @@ Road Map
     使用 Overpass API 或本地 GeoJSON 文件定义球场的发球台（Tee）和果岭（Green）坐标
     实现距离计算逻辑
 
-    Add feature: show hole info: par3/4/5
-    Add testing feature only in debug mode: set a pseudo user location for testing. e.g. set user location to tee when hole got switched
-    Add feature: set the map to show the current hole fairway, zoom accordingly, when hole is switched.
-                 When switching hole, move, zoom, and change view direction to show the hole fairway with whole screen 
-                 map view direction: facing the direction of the tee from current user location. e.g. the flag should on the top of the screen.
-                rotate the map in this way: from the user or tee, the direction to flag is a vertical line to the screen top   
+    Added: load a local course list for quickly searching
+    Added: show a round page when a course is selected
+     todo: to play a round, select first: tee/color, 9holes/18holes, starting from 1 or 10, etc
 
     Add feature: get golf course info by calling overpass api. save as file for next time use.
+    Add feature: show hole info: par3/4/5
+    Add testing feature only in debug mode: set a pseudo user location for testing. e.g. set user location to tee when hole got switched
+
+    Add feature in round page:
+           set the map to show the current hole fairway, zoom accordingly, when hole is switched.
+           When switching hole, move, zoom, and change view direction to show the hole fairway with whole screen 
+           map view direction: facing the direction of the tee from current user location. e.g. the flag should on the top of the screen.
+           rotate the map in this way: from the user or tee, the direction to flag is a vertical line to the screen top   
+
     
 
 第三阶段：交互功能
@@ -35,7 +41,7 @@ Road Map
 
     离线地图：使用 flutter_map_mbtiles 缓存地图数据，防止球场信号不好
     风向显示：集成气象 API，显示实时风向和风速
-
+    todo/feature: maintain a club set DB of all famous brands. so users can maintain clubs easily.
 
 Android watch support
 -----------------------
