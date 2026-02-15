@@ -1,11 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Import for rootBundle
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'models/golf_course.dart';
-import 'models/course_parser.dart';
-import 'models/round.dart';
-import 'models/player.dart';
 import 'round_page.dart';
 
 // A simple class to hold the compact course data
@@ -25,11 +20,8 @@ class CompactCourse {
   }
 }
 
-
 class CourseSelectionPage extends StatefulWidget {
-  final Function(Round) onRoundStarted;
-
-  const CourseSelectionPage({super.key, required this.onRoundStarted});
+  const CourseSelectionPage({super.key});
 
   @override
   _CourseSelectionPageState createState() => _CourseSelectionPageState();
@@ -54,10 +46,14 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
 
     try {
       // Corrected to load from the root asset path
-      final String jsonString = await rootBundle.loadString('nz-course-compact.json');
+      final String jsonString = await rootBundle.loadString(
+        'nz-course-compact.json',
+      );
       final List<dynamic> data = json.decode(jsonString);
       setState(() {
-        _allCourses = data.map((courseJson) => CompactCourse.fromJson(courseJson)).toList();
+        _allCourses = data
+            .map((courseJson) => CompactCourse.fromJson(courseJson))
+            .toList();
         _searchResults = _allCourses; // Initially, show all courses
       });
     } catch (e) {
@@ -82,59 +78,11 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
       }
     });
   }
-  
-  Future<void> _fetchAndStartRound(String courseName) async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    // Use the course name to query Overpass API for full data
-    final downloadQuery = """
-[out:json];
-area[name="New Zealand"]->.searchArea;
-(
-  way["leisure"="golf_course"]["name"="$courseName"](area.searchArea);
-  node(w);
-  rel(bw);
-);
-out body;
->;
-out skel qt;
-    """;
-
-    try {
-      final response = await http.post(
-        Uri.parse('https://overpass-api.de/api/interpreter'),
-        body: downloadQuery,
-      );
-
-      if (response.statusCode == 200) {
-        final golfCourse = CourseParser.fromJson(response.body, courseName);
-        final player = Player(name: 'Rick');
-        final round = Round(player: player, course: golfCourse, date: DateTime.now());
-        widget.onRoundStarted(round);
-
-      } else {
-        throw Exception('Failed to download full course data');
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Download failed: $e')),
-      );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select a Golf Course'),
-      ),
+      appBar: AppBar(title: const Text('Select a Golf Course')),
       body: Column(
         children: [
           Padding(
@@ -158,10 +106,19 @@ out skel qt;
                     itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
                       final course = _searchResults[index];
-                      
+
                       return ListTile(
                         title: Text(course.name),
-                        onTap: () => _fetchAndStartRound(course.name),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              // XXX builder: (context) => RoundPage(courseName: course.name),
+                              builder: (context) =>
+                                  RoundPage(courseName: 'Karori Golf Club'),
+                            ),
+                          );
+                        },
                       );
                     },
                   ),
