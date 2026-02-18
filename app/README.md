@@ -41,6 +41,9 @@ Road Map
     风向显示: 集成气象 API，显示实时风向和风速
     todo/feature: maintain a club set DB of all famous brands. so users can maintain clubs easily.
 
+    todo/feature: while finding myself on a tee/in-a-course, automatically select the course
+                   只需要问用户： play now？ which tee？
+
 
 Android watch support
 -----------------------

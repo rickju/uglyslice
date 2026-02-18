@@ -13,6 +13,7 @@ import 'models/player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
+// page widget
 class RoundPage extends StatefulWidget {
   final String courseName;
 
@@ -22,62 +23,31 @@ class RoundPage extends StatefulWidget {
   State<RoundPage> createState() => _RoundPageState();
 }
 
+// state
 class _RoundPageState extends State<RoundPage> {
-  Round? _round;
   bool _isLoading = true;
-  String? _errorMessage;
-  LatLng? _currentPalyerPos;
+
+  Round? _round;
   int _currentHoleIndex = 0;
+  LatLng? _currentPlayerPos;
   LatLng? _selectedTee;
   LatLng? _rulerTarget;
   bool _isSatellite = false;
+
+  String? _errorMessage;
   final MapController _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
-    _fetchRoundData();
+    _loadCourse();
   }
 
-  Future<void> _fetchRoundData() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = '${widget.courseName.replaceAll(' ', '_')}.json';
-    final file = File('${directory.path}/$fileName');
-
-    debugPrint('Looking for local cached course file at: ${file.path}');
-
-    if (await file.exists()) {
-      try {
-        final jsonString = await file.readAsString();
-        final golfCourse = CourseParser.fromJson(jsonString, widget.courseName);
-        final player = Player(name: 'Rick');
-        setState(() {
-          _round = Round(
-            player: player,
-            course: golfCourse,
-            date: DateTime.now(),
-          );
-          _isLoading = false;
-        });
-        debugPrint(
-          'Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}',
-        );
-        _determinePosition();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_round!.course.holes.isNotEmpty) {
-            _fitMapToHoleView(0);
-          }
-        });
-        return;
-      } catch (e) {
-        // Fallback to network if cache is invalid
-      }
-    }
-
+  Future<void> _apiQuery(File file) async {
     /// - way["leisure"="golf_course"]["name"="${widget.courseName}"](area.searchArea);
     /// + way["leisure"="golf_course"]["name"="${widget.courseName}"](-47.5, 166.0, -34.0, 179.0);
     // Use the course name to query Overpass API for full data
-    final downloadQuery =
+    final query =
         """
 [out:json];
 area[name="New Zealand"]->.searchArea;
@@ -92,10 +62,10 @@ out skel qt;
     """;
 
     try {
-      debugPrint('download query: $downloadQuery');
+      debugPrint('api query: $query');
       final response = await http.post(
         Uri.parse('https://overpass-api.de/api/interpreter'),
-        body: downloadQuery,
+        body: query,
       );
 
       if (response.statusCode == 200) {
@@ -127,7 +97,7 @@ out skel qt;
           }
         });
       } else {
-        throw Exception('Failed to download full course data');
+        throw Exception('Failed to query full course data');
       }
     } catch (e) {
       final directory = await getApplicationDocumentsDirectory();
@@ -137,14 +107,52 @@ out skel qt;
       setState(() {
         _isLoading = false;
         _errorMessage =
-            'Download failed for ${widget.courseName}.\n\n'
+            'api query failed for ${widget.courseName}.\n\n'
             'To use a cached file, please place it at:\n$expectedPath';
       });
     }
-  }
+  } // _apiQuery
+
+  Future<void> _loadCourse() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final fileName = '${widget.courseName.replaceAll(' ', '_')}.json';
+    final file = File('${directory.path}/$fileName');
+
+    debugPrint('Looking for local cached course file at: ${file.path}');
+    if (await file.exists()) {
+      try {
+        final jsonString = await file.readAsString();
+        final golfCourse = CourseParser.fromJson(jsonString, widget.courseName);
+        final player = Player(name: 'Rick');
+        setState(() {
+          _round = Round(
+            player: player,
+            course: golfCourse,
+            date: DateTime.now(),
+          );
+          _isLoading = false;
+        });
+        debugPrint(
+          'Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}',
+        );
+        _determinePosition();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_round!.course.holes.isNotEmpty) {
+            _fitMapToHoleView(0);
+          }
+        });
+        return;
+      } catch (e) {
+        debugPrint('failed to load local course json file');
+        // Fallback to network if cache is invalid
+        await _apiQuery(file);
+      }
+    }
+  } // _loadCourse
 
   Future<void> _determinePosition() async {
     if (kIsWeb || Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+      // GPS
       bool serviceEnabled;
       LocationPermission permission;
 
@@ -163,8 +171,9 @@ out skel qt;
         ),
       ).listen((Position position) {
         final newPos = LatLng(position.latitude, position.longitude);
+        debugPrint('new pos: $newPos.toString()');
         setState(() {
-          _currentPalyerPos = newPos;
+          _currentPlayerPos = newPos;
         });
 
         if (_round != null && _round!.course.holes.isNotEmpty) {
@@ -174,6 +183,7 @@ out skel qt;
         }
       });
     } else {
+      // failover while no gps
       if (_round != null && _round!.course.holes.isNotEmpty) {
         final firstHole = _round!.course.holes[0];
         LatLng fallbackPosition;
@@ -186,13 +196,13 @@ out skel qt;
 
         setState(() {
           debugPrint('Failover to course hole #1 tee');
-          _currentPalyerPos = fallbackPosition;
+          _currentPlayerPos = fallbackPosition;
         });
       } else {
         setState(() {
           // Fake pos: Karori golf, Wellington, NZ
-          debugPrint('Failover to Wellington !!!');
-          _currentPalyerPos = const LatLng(-41.2866, 174.7772);
+          debugPrint('Failover to Karori course');
+          _currentPlayerPos = const LatLng(-41.2866, 174.7772);
         });
       }
     }
@@ -228,16 +238,17 @@ out skel qt;
       targetGreen = _round!.course.holes[_currentHoleIndex].pin;
     }
 
-    if (_currentPalyerPos != null && targetGreen != null) {
+    if (_currentPlayerPos != null && targetGreen != null) {
       double meters = const Distance().as(
         LengthUnit.Meter,
-        _currentPalyerPos!,
+        _currentPlayerPos!,
         targetGreen,
       );
       distanceInYards = (meters * 1.09361).round();
     }
 
     return Scaffold(
+      // toolbar
       appBar: AppBar(
         title: Text(
           _round!.course.holes.isNotEmpty
@@ -258,6 +269,7 @@ out skel qt;
       body: Stack(
         children: [
           FlutterMap(
+            // ---- MAP ---
             mapController: _mapController,
             options: MapOptions(
               initialCenter: const LatLng(-41.2895, 174.6938),
@@ -267,6 +279,7 @@ out skel qt;
               }),
             ),
             children: [
+              // --- map tiles ---
               TileLayer(
                 urlTemplate: _isSatellite
                     ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -274,6 +287,7 @@ out skel qt;
                 userAgentPackageName: 'com.example.golfapp',
               ),
               PolygonLayer(
+                // --- course border ---
                 polygons: [
                   for (var feature in _round!.course.features)
                     Polygon(
@@ -284,11 +298,11 @@ out skel qt;
                     ),
                 ],
               ),
-              if (_currentPalyerPos != null)
+              if (_currentPlayerPos != null) // --- curr pos ---
                 MarkerLayer(
                   markers: [
                     Marker(
-                      point: _currentPalyerPos!,
+                      point: _currentPlayerPos!,
                       width: 40,
                       height: 40,
                       child: const Icon(
@@ -299,7 +313,7 @@ out skel qt;
                     ),
                   ],
                 ),
-              if (_round!.course.holes.isNotEmpty)
+              if (_round!.course.holes.isNotEmpty) // --- tee ----
                 MarkerLayer(
                   markers: [
                     for (var tee
@@ -326,7 +340,7 @@ out skel qt;
                       ),
                   ],
                 ),
-              if (_rulerTarget != null)
+              if (_rulerTarget != null) // --- ruler ---
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -345,6 +359,7 @@ out skel qt;
           ),
           if (_round!.course.holes.isNotEmpty)
             Positioned(
+              // --- top toolbar ---
               top: 10,
               left: 20,
               right: 20,
@@ -361,6 +376,7 @@ out skel qt;
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
+                      // --- button: Previous Hole ---
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () {
                         setState(() {
@@ -381,6 +397,7 @@ out skel qt;
                       ),
                     ),
                     IconButton(
+                      // --- button: Next Hole ----
                       icon: const Icon(
                         Icons.arrow_forward,
                         color: Colors.white,
@@ -401,6 +418,7 @@ out skel qt;
               ),
             ),
           Positioned(
+            // --- bottom toolbar ---
             bottom: 30,
             left: 20,
             right: 20,
@@ -422,7 +440,7 @@ out skel qt;
                         ),
                       ),
                       Text(
-                        _currentPalyerPos == null
+                        _currentPlayerPos == null
                             ? "Locating..."
                             : '$distanceInYards YDS',
                         style: const TextStyle(
@@ -445,15 +463,15 @@ out skel qt;
           FloatingActionButton(
             heroTag: 'gps_button',
             onPressed: () {
-              if (_currentPalyerPos != null &&
+              if (_currentPlayerPos != null &&
                   _round!.course.holes.isNotEmpty) {
                 final targetGreen = _round!.course.holes[_currentHoleIndex].pin;
                 final bearing = const Distance().bearing(
-                  _currentPalyerPos!,
+                  _currentPlayerPos!,
                   targetGreen,
                 );
                 _mapController.moveAndRotate(
-                  _currentPalyerPos!,
+                  _currentPlayerPos!,
                   16.0,
                   -bearing,
                 );
@@ -467,8 +485,8 @@ out skel qt;
             onPressed: () {
               // This is where you would record a shot.
               // For now, it just prints the current location.
-              if (_currentPalyerPos != null) {
-                print('Recording shot at: $_currentPalyerPos');
+              if (_currentPlayerPos != null) {
+                debugPrint('Recording shot at: $_currentPlayerPos');
               }
             },
             child: const Icon(Icons.add),
@@ -499,6 +517,9 @@ out skel qt;
     if (_selectedTee == null ||
         _round == null ||
         _round!.course.holes.isEmpty) {
+      debugPrint(
+        'round_page::_fitMapToHole: selected tee: $_selectedTee, round: $_round',
+      );
       return;
     }
 
@@ -510,10 +531,54 @@ out skel qt;
   }
 
   void _fitMapToHoleView(int holeIndex) {
-    if (_round == null || _round!.course.holes.isEmpty) return;
+    debugPrint('round_page::_fitMapToHoleView: selected tee: $_selectedTee');
+    if (_round == null || _round!.course.holes.isEmpty) {
+      return;
+    }
 
+    // hole boundary
     final hole = _round!.course.holes[holeIndex];
-    final points = [hole.pin, ...hole.tees.map((t) => t.position)];
+    debugPrint('round_page::_fitMapToHoleView: hole #: ${hole.holeNumber}');
+    debugPrint('pin: ${hole.pin}');
+    debugPrint('tee num: ${hole.tees.length}');
+
+    // ------------------------------
+    final pin = hole.pin;
+    final LatLng teePosition = hole.tees[0].position;
+    // 1. 基础点集：包含旗杆和发球台
+    final List<LatLng> points = [
+      hole.pin,
+      ...hole.tees.map((Tee t) => t.position),
+    ];
+    debugPrint(
+      'points: \n${points.map((p) => "(${p.latitude}, ${p.longitude})").join("\n")}',
+    );
+
+    // 2. 计算距离以确定动态 Padding (方案 3)
+    const Distance distanceCalculator = Distance();
+    final double meters = distanceCalculator.as(
+      LengthUnit.Meter,
+      pin,
+      teePosition,
+    );
+
+    // 根据球洞长度决定边距
+    double dynamicPadding = meters < 150 ? 100.0 : 60.0;
+
+    // 3. 使用 v8.x 推荐的 fitCamera 方法
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(points),
+        padding: EdgeInsets.all(dynamicPadding),
+        // 方案 2：限制最大缩放，防止只有一个 Tee 时缩放过深
+        maxZoom: 18.0,
+        // 方案 3：如果需要，可以设置 minZoom 防止缩放得太小看不了全景
+        minZoom: 3.0,
+      ),
+    );
+
+    debugPrint('fitCamera: Distance ${meters.toStringAsFixed(1)}m');
+    // ------------------------------
 
     if (points.isEmpty) {
       _mapController.move(hole.pin, 16);
@@ -521,7 +586,7 @@ out skel qt;
     }
 
     final bounds = LatLngBounds.fromPoints(points);
-
+    debugPrint(bounds.toString());
     LatLng centerOfTees;
     if (hole.tees.isNotEmpty) {
       double totalLat = 0;

@@ -58,5 +58,5 @@ class CourseParser {
       features: features,
       nodes: nodes,
     );
-  }
+  } // fromJson
 }
