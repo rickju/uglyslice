@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'models/golf_course.dart';
-import 'models/course_parser.dart';
 import 'models/player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
@@ -43,23 +42,28 @@ class _RoundPageState extends State<RoundPage> {
     _loadCourse();
   }
 
+  // XXX: hard code: Karori XXX
   Future<void> _apiQuery(File file) async {
-    /// - way["leisure"="golf_course"]["name"="${widget.courseName}"](area.searchArea);
-    /// + way["leisure"="golf_course"]["name"="${widget.courseName}"](-47.5, 166.0, -34.0, 179.0);
-    // Use the course name to query Overpass API for full data
-    final query =
-        """
-[out:json];
-area[name="New Zealand"]->.searchArea;
+    final query = """
+[out:json][timeout:25];
+// 1. 查找指定名称的球场主体（可以是 Way 或 Relation）
 (
-  way["leisure"="golf_course"]["name"="${widget.courseName}"](-47.5, 166.0, -34.0, 179.0);
-  node(w);
-  rel(bw);
+  // way["leisure"="golf_course"]["name"~"佘山国际高尔夫"];
+  // relation["leisure"="golf_course"]["name"~"佘山国际高尔夫"];
+  node["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
+  way["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
+  relation["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
+)->.course;
+// 2. 将球场主体放入输出
+.course out geom;
+// 3. 递归获取该球场区域内的所有高尔夫相关设施（果岭、沙坑等）
+(
+  node(area.course)["golf"];
+  way(area.course)["golf"];
+  relation(area.course)["golf"];
 );
-out body;
->;
-out skel qt;
-    """;
+out geom;
+""";
 
     try {
       debugPrint('api query: $query');
@@ -143,9 +147,9 @@ out skel qt;
         });
         return;
       } catch (e) {
-        debugPrint('failed to load local course json file');
+        debugPrint('failed to load local course json file, error: $e');
         // Fallback to network if cache is invalid
-        await _apiQuery(file);
+        // XXX await _apiQuery(file); XXX
       }
     }
   } // _loadCourse
@@ -544,6 +548,10 @@ out skel qt;
 
     // ------------------------------
     final pin = hole.pin;
+    if (hole.tees.isEmpty) {
+      _mapController.move(pin, 16);
+      return;
+    }
     final LatLng teePosition = hole.tees[0].position;
     // 1. 基础点集：包含旗杆和发球台
     final List<LatLng> points = [
