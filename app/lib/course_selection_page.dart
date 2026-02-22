@@ -1,8 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart'; // Import for rootBundle
 import 'dart:convert';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+import 'round_page.dart';
+
+// A simple class to hold the compact course data
+class CompactCourse {
+  final String name;
+  final double lat;
+  final double lon;
+
+  CompactCourse({required this.name, required this.lat, required this.lon});
+
+  factory CompactCourse.fromJson(Map<String, dynamic> json) {
+    return CompactCourse(
+      name: json['name'],
+      lat: json['lat'],
+      lon: json['lon'],
+    );
+  }
+}
 
 class CourseSelectionPage extends StatefulWidget {
   const CourseSelectionPage({super.key});
@@ -13,8 +29,8 @@ class CourseSelectionPage extends StatefulWidget {
 
 class _CourseSelectionPageState extends State<CourseSelectionPage> {
   final TextEditingController _searchController = TextEditingController();
-  List<dynamic> _allCourses = [];
-  List<dynamic> _filteredCourses = [];
+  List<CompactCourse> _allCourses = []; // Store all courses from the local file
+  List<CompactCourse> _searchResults = [];
   bool _isLoading = false;
 
   @override
@@ -27,49 +43,46 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
     setState(() {
       _isLoading = true;
     });
+
     try {
-      final String data = await DefaultAssetBundle.of(context).loadString('assets/golf_courses_nz.json');
-      final List<dynamic> jsonResult = json.decode(data);
+      // Corrected to load from the root asset path
+      final String jsonString = await rootBundle.loadString(
+        'nz-course-compact.json',
+      );
+      final List<dynamic> data = json.decode(jsonString);
       setState(() {
-        _allCourses = jsonResult;
-        _filteredCourses = _allCourses;
+        _allCourses = data
+            .map((courseJson) => CompactCourse.fromJson(courseJson))
+            .toList();
+        _searchResults = _allCourses; // Initially, show all courses
       });
     } catch (e) {
-      print('Error loading local courses: $e');
-      if (!mounted) return; // Crucial check before showing SnackBar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load local courses: $e')),
       );
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
   void _filterCourses(String query) {
-    if (query.isEmpty) {
-      setState(() {
-        _filteredCourses = _allCourses;
-      });
-      return;
-    }
     setState(() {
-      _filteredCourses = _allCourses.where((course) {
-        final courseName = course['tags']['name']?.toString().toLowerCase() ?? '';
-        return courseName.contains(query.toLowerCase());
-      }).toList();
+      if (query.isEmpty) {
+        _searchResults = _allCourses;
+      } else {
+        _searchResults = _allCourses.where((course) {
+          return course.name.toLowerCase().contains(query.toLowerCase());
+        }).toList();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select a Golf Course'),
-      ),
+      appBar: AppBar(title: const Text('Select a Golf Course')),
       body: Column(
         children: [
           Padding(
@@ -84,70 +97,27 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
                 ),
               ),
               onChanged: (value) => _filterCourses(value),
-              onSubmitted: (value) => _filterCourses(value),
             ),
           ),
           _isLoading
               ? const Center(child: CircularProgressIndicator())
               : Expanded(
                   child: ListView.builder(
-                    itemCount: _filteredCourses.length,
+                    itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
-                      final course = _filteredCourses[index];
-                      final tags = course['tags'];
-                      final courseName = tags['name'] ?? 'Unknown Course';
+                      final course = _searchResults[index];
 
                       return ListTile(
-                        title: Text(courseName),
-                        onTap: () async {
-                          setState(() {
-                            _isLoading = true;
-                          });
-
-                          final courseId = course['id'];
-                          final downloadQuery = """
-[out:json];
-(
-  way($courseId);
-  node(w);
-  rel(bw);
-);
-out body;
-node(w);
-out skel qt;
-                          """;
-
-                          try {
-                            final response = await http.post(
-                              Uri.parse('https://overpass-api.de/api/interpreter'),
-                              body: downloadQuery,
-                            );
-
-                            if (response.statusCode == 200) {
-                              final directory = await getApplicationDocumentsDirectory();
-                              final path = '${directory.path}/selected_course.json';
-                              final file = File(path);
-                              await file.writeAsString(response.body);
-
-                              if (mounted) {
-                                Navigator.pushNamed(context, '/map');
-                              }
-                            } else {
-                              throw Exception('Failed to download course data. Status code: ${response.statusCode}');
-                            }
-                          } catch (e) {
-                            print('Error downloading course: $e');
-                            if (!mounted) return; // Crucial check before showing SnackBar
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Download failed: $e')),
-                            );
-                          } finally {
-                            if (mounted) {
-                              setState(() {
-                                _isLoading = false;
-                              });
-                            }
-                          }
+                        title: Text(course.name),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              // XXX builder: (context) => RoundPage(courseName: course.name),
+                              builder: (context) =>
+                                  RoundPage(courseName: 'Karori Golf Club'),
+                            ),
+                          );
                         },
                       );
                     },

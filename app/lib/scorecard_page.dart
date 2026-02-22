@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:golf_track_app/models/golf_course.dart';
-import 'package:golf_track_app/models/scorecard.dart';
+import 'package:ugly_slice/models/course.dart';
+import 'package:ugly_slice/models/scorecard.dart';
 
 class ScorecardPage extends StatefulWidget {
   final GolfCourse golfCourse;
@@ -22,9 +22,7 @@ class _ScorecardPageState extends State<ScorecardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scorecard'),
-      ),
+      appBar: AppBar(title: const Text('Scorecard')),
       body: ListView.builder(
         itemCount: widget.golfCourse.holes.length,
         itemBuilder: (context, index) {
