@@ -7,7 +7,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'models/golf_course.dart';
+import 'models/course.dart';
 import 'models/player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';

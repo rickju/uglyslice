@@ -1,14 +1,9 @@
 import 'package:latlong2/latlong.dart';
 import 'player.dart';
 import 'club.dart';
-import 'golf_course.dart';
+import 'course.dart';
 
-enum LieType {
-  fairway,
-  rough,
-  sand,
-  green,
-}
+enum LieType { fairway, rough, sand, green }
 
 class Shot {
   final LatLng startLocation;
@@ -28,10 +23,7 @@ class HolePlay {
   final int holeNumber;
   final List<Shot> shots;
 
-  HolePlay({
-    required this.holeNumber,
-    this.shots = const [],
-  });
+  HolePlay({required this.holeNumber, this.shots = const []});
 
   int get score => shots.length;
 }

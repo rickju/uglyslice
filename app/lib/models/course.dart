@@ -61,12 +61,14 @@ class Hole {
     );
     for (var i = 0; i < way.nodeIds.length; i++) {
       final nodeId = way.nodeIds[i];
-      // Find the corresponding node in the allNodes list
+
+      // nodes list
       final node = allNodes.firstWhere(
         (n) => n.id == nodeId,
         orElse: () => throw Exception('Node $nodeId not found'),
       );
       print('    - Node ${node.id} tags: ${node.tags}');
+      // node for pin/tee
       if (node.tags['golf'] == 'pin') {
         pin = node.toLatLng();
         print('      - Found pin at ${pin}');
@@ -280,8 +282,7 @@ class CourseParser {
       if (element['type'] == 'way' || element['type'] == 'relation') {
         final tags = element['tags'] ?? {};
         if (tags['golf'] == 'hole' || tags['type'] == 'hole') {
-          // 这里调用你的 Hole.fromWay 或 Hole.fromRelation
-          // 逻辑：寻找该球洞关联的 fairway, green, tee 等成员
+          // will call Hole.fromWay 或 Hole.fromRelation: 寻找该球洞关联的 fairway, green, tee 等成员
           final hole = _parseHole(element, allFeatures, nodeTags, allNodes);
           if (hole != null) holes.add(hole);
         }
