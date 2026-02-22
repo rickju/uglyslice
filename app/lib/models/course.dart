@@ -1,5 +1,6 @@
 import 'package:latlong2/latlong.dart';
 import 'dart:convert';
+import 'package:collection/collection.dart';
 
 class Tee {
   final String color;
@@ -62,24 +63,23 @@ class Hole {
     for (var i = 0; i < way.nodeIds.length; i++) {
       final nodeId = way.nodeIds[i];
 
-      // nodes list
-      final node = allNodes.firstWhere(
-        (n) => n.id == nodeId,
-        orElse: () => throw Exception('Node $nodeId not found'),
-      );
-      print('    - Node ${node.id} tags: ${node.tags}');
-      // node for pin/tee
-      if (node.tags['golf'] == 'pin') {
-        pin = node.toLatLng();
-        print('      - Found pin at ${pin}');
-      } else if (node.tags['golf'] == 'tee') {
-        final tee = Tee(
-          color: node.tags['tee'] ?? 'white',
-          distance: double.parse(node.tags['distance'] ?? '0'),
-          position: node.toLatLng(),
-        );
-        print('      - Found tee at ${tee}');
-        tees.add(tee);
+      // nodes list. lj: overpass out geom does NOT include all nodes
+      final Node? node = allNodes.firstWhereOrNull((n) => n.id == nodeId);
+      if (node != null) {
+        print('    - Node ${node.id} tags: ${node.tags}');
+        // node for pin/tee
+        if (node.tags['golf'] == 'pin') {
+          pin = node.toLatLng();
+          print('      - Found pin at ${pin}');
+        } else if (node.tags['golf'] == 'tee') {
+          final tee = Tee(
+            color: node.tags['tee'] ?? 'white',
+            distance: double.parse(node.tags['distance'] ?? '0'),
+            position: node.toLatLng(),
+          );
+          print('      - Found tee at ${tee}');
+          tees.add(tee);
+        }
       }
     }
 
