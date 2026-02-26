@@ -3,7 +3,7 @@ import 'package:ugly_slice/models/course.dart';
 import 'package:ugly_slice/models/scorecard.dart';
 
 class ScorecardPage extends StatefulWidget {
-  final GolfCourse golfCourse;
+  final Course golfCourse;
   final Scorecard scorecard;
   final Function(int, int) onScoreChanged;
 

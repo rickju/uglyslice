@@ -30,7 +30,7 @@ class HolePlay {
 
 class Round {
   final Player player;
-  final GolfCourse course;
+  final Course course;
   final DateTime date;
   final List<HolePlay> holePlays;
   String status;

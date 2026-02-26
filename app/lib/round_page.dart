@@ -73,10 +73,7 @@ out geom;
       );
 
       if (response.statusCode == 200) {
-        final golfCourse = CourseParser.fromJson(
-          response.body,
-          widget.courseName,
-        );
+        final golfCourse = Course.fromJson(response.body, widget.courseName);
 
         // if (golfCourse.holes.isNotEmpty) {
         await file.writeAsString(response.body);
@@ -126,7 +123,7 @@ out geom;
     if (await file.exists()) {
       try {
         final jsonString = await file.readAsString();
-        final golfCourse = CourseParser.fromJson(jsonString, widget.courseName);
+        final golfCourse = Course.fromJson(jsonString, widget.courseName);
         final player = Player(name: 'Rick');
         setState(() {
           _round = Round(

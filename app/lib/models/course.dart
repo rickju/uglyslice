@@ -1,6 +1,50 @@
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'dart:convert';
 import 'package:collection/collection.dart';
+import 'package:dart_jts/dart_jts.dart' as jts;
+import 'overpass.dart';
+
+/* 
+class Bunker {}
+class Hazard {}
+class {}
+*/
+
+// 不规则多边形 list of nodes
+class Boundary {
+
+ static Boundary? fromWay() {
+ }
+}
+
+// overpass:way with tags:golf=pin
+class Green {
+  final List<Node> allNodes;
+  final Boundary bounary ;
+
+  static Green? fromWay(
+    dynamic element,
+    Way way,
+    Map<int, Map<String, dynamic>> nodeTags,
+    List<Node> allNodes,
+  ) {
+      final bounds = LatLngBounds(
+        LatLng(40.712, -74.006), 
+        LatLng(40.730, -73.935)
+      );
+  }
+}
+
+class Fairway {
+  final List<Node> allNodes;
+
+  static Fairway? fromWay(
+    dynamic element,
+    Way way) {
+  }
+}
+
 
 class Tee {
   final String color;
@@ -21,6 +65,20 @@ class Tee {
   String toString() {
     return 'Tee: $color, $distance, course rating: $courseRating, slope rating: $slopeRating\n';
   }
+
+  static Tee? fromWay(
+    dynamic element,
+    Way way,
+    Map<int, Map<String, dynamic>> nodeTags,
+    List<Node> allNodes,
+  ) {
+      // XXX
+      final bounds = LatLngBounds(
+        LatLng(40.712, -74.006), 
+        LatLng(40.730, -73.935)
+      );
+
+  }
 }
 
 class Hole {
@@ -28,7 +86,12 @@ class Hole {
   final int par;
   final int handicapIndex;
   final LatLng pin;
+
+  final LatLng boundMin, boundMax;
+  final boundary;
   final List<Tee> tees;
+  final Fairway fairway; // list ???
+  final Green green;
 
   Hole({
     required this.holeNumber,
@@ -36,9 +99,12 @@ class Hole {
     this.handicapIndex = 0,
     required this.pin,
     this.tees = const [],
+    required this.boundMin,
+    required this.boundMax,
   });
 
   static Hole? fromWay(
+    dynamic element,
     Way way,
     Map<int, Map<String, dynamic>> nodeTags,
     List<Node> allNodes,
@@ -52,11 +118,19 @@ class Hole {
     final handicapIndex = int.parse(way.tags['handicap'] ?? '0');
 
     // bounds
+    final bounds = element['bounds'];
+    final LatLng boundMin = LatLng(
+      bounds['minlat'] ?? 0.0,
+      bounds['minlon'] ?? 0.0,
+    );
+    final LatLng boundMax = LatLng(
+      bounds['maxlat'] ?? 0.0,
+      bounds['maxlon'] ?? 0.0,
+    );
 
     // pin/tee
     LatLng? pin;
     List<Tee> tees = [];
-
     print(
       '  - Processing hole ${way.tags["ref"]} with ${way.nodeIds.length} nodes.',
     );
@@ -94,6 +168,8 @@ class Hole {
       handicapIndex: handicapIndex,
       pin: pin,
       tees: tees,
+      boundMin: boundMin,
+      boundMax: boundMax,
     );
   }
 
@@ -103,19 +179,91 @@ class Hole {
   }
 }
 
-// course: holes list
-class GolfCourse {
+// course
+// ---------
+class Course {
+  final String id;
+  final String name;
+
+  final List<Node> nodes;
+  final List<Way> ways;
+  final List<Relation> relations;
+  final List<Hole> holes;
+  // final boundary;
+  // final tags; // addr/phone etc
+  // facility e.g. clubhouse/cartpath
+
+  Course({
+    required this.id,
+    required this.name,
+    this.nodes = const [],
+    this.ways = const <Way> [],
+    this.relations = const <Relation> [],
+    this.holes = const [],
+  });
+
+  static Course fromJson(String json) {
+    final Map<String, dynamic> data = json.decode(jsonString);
+    final List<dynamic> elements = data['elements'];
+    print('json parsed: elements num: ${elements.length}');
+
+    final Map<int, LatLng> nodeCoordinates = {};
+    final Map<int, Map<String, dynamic>> nodeTags = {};
+
+    final List<Node> allNodes = [];
+    final List<Way> allWays= [];
+    final List<Relation> allRelations = [];
+    final List<Hole> allHoles= [];
+
+    // node/way
+    for (var element in elements) {
+      if (element['type'] == 'node') {
+        final int id = element['id'];
+        final double lat = element['lat'];
+        final double lon = element['lon'];
+        final LatLng position = LatLng(lat, lon);
+
+        final node = Node.fromJson(element);
+        allNodes.add(node); 
+      } else if (element['type'] == 'way') {
+        final way = Way.fromJson(element, null);
+        allWays.add(way); 
+      } else if (element['type'] == 'relation') {
+        final relation = Relation.fromJson(element, null);
+        allRelations.add(relation)
+      }
+    } // for
+
+    // hole
+    for (var way in allWays) {
+    }
+
+    return Course(
+      id: "course_${DateTime.now().millisecondsSinceEpoch}",
+      name: "XXX",
+      nodes: allNodes,
+      ways: allWays,
+      relations: allRelations,
+      holes: allHoles,
+    );
+  } // fromJson
+}
+
+class CourseHelper  {
   final String id;
   final String name;
   final LatLng location;
   final int holesCount;
-  final List<Hole> holes;
-
-  // These are for parsing from OpenStreetMap data
   final List<Way> features;
-  final List<Node> nodes;
 
-  GolfCourse({
+  // from OpenStreetMap data
+  final List<Node> nodes;
+  final List<Hole> holes;
+  // final boundary;
+  // final tags; // addr/phone etc
+  // facility e.g. clubhouse/cartpath
+
+  CourseHelper({
     required this.id,
     required this.name,
     required this.location,
@@ -127,98 +275,19 @@ class GolfCourse {
 
   @override
   String toString() {
-    return 'GolfCourse: $name, $id, $location, holes count: $holesCount, holes: ${holes.toString()}\n';
-  }
-}
-
-//
-class Node {
-  final int id;
-  final double lat;
-  final double lon;
-  final Map<String, dynamic> tags;
-
-  Node({
-    required this.id,
-    required this.lat,
-    required this.lon,
-    required this.tags,
-  });
-
-  factory Node.fromJson(Map<String, dynamic> json) {
-    return Node(
-      id: json['id'],
-      lat: json['lat'],
-      lon: json['lon'],
-      tags: json['tags'] ?? {},
-    );
+    return 'Course: $name, $id, $location, holes count: $holesCount, holes: ${holes.toString()}\n';
   }
 
-  LatLng toLatLng() {
-    return LatLng(lat, lon);
-  }
-
-  @override
-  String toString() {
-    return 'overpass Node: id: $id, tags: ${tags.toString()}\n';
-  }
-}
-
-// 线/面: nodes list, point list
-class Way {
-  final int id;
-  final List<int> nodeIds;
-  final List<LatLng> points;
-  final Map<String, dynamic> tags;
-
-  Way({
-    required this.id,
-    required this.nodeIds,
-    required this.points,
-    required this.tags,
-  });
-
-  factory Way.fromJson(
-    Map<String, dynamic> json,
-    Map<int, LatLng> nodeCoordinates,
-  ) {
-    final List<int> originalNodeIds = List<int>.from(json['nodes']);
-    final List<LatLng> points = [];
-    final List<int> validNodeIds = [];
-
-    for (var id in originalNodeIds) {
-      if (nodeCoordinates.containsKey(id)) {
-        points.add(nodeCoordinates[id]!);
-        validNodeIds.add(id);
-      }
-    }
-
-    return Way(
-      id: json['id'],
-      nodeIds: validNodeIds,
-      points: points,
-      tags: json['tags'] ?? {},
-    );
-  }
-
-  @override
-  String toString() {
-    return 'overpass Way(name: $id, node id list: ${nodeIds.toString()}, tags: ${tags.toString()}';
-  }
-}
-
-class CourseParser {
-  static GolfCourse fromJson(String jsonString, String courseName) {
+  static Course fromJson(String jsonString, String courseName) {
     final Map<String, dynamic> data = json.decode(jsonString);
     final List<dynamic> elements = data['elements'];
     print('json parsed: elements num: ${elements.length}');
-    print('elements list: ${elements.toString()}');
+    // print('got json elements list: ${elements.toString()}');
 
-    // 1. 预处理所有 Node，建立坐标索引映射
+    //  预处理所有 Node，建立坐标索引映射
     final Map<int, LatLng> nodeCoordinates = {};
     final Map<int, Map<String, dynamic>> nodeTags = {};
     final List<Node> allNodes = [];
-
     for (var element in elements) {
       if (element['type'] == 'node') {
         final int id = element['id'];
@@ -235,11 +304,11 @@ class CourseParser {
     print('json parsed: allNodes len: ${allNodes.length}');
     // print('allNodes: ${allNodes.toString()}');
 
-    // 2. 初始化集合
-    final List<Hole> holes = [];
+    // 
+    final List<Hole> oles = [];
     final List<Way> allFeatures = []; // 存储所有地理要素（果岭、球道、沙坑等）
 
-    // 3. 第一次遍历 Way：建立基础地理要素
+    // cycle #1:  Way/基础地理要素
     for (var element in elements) {
       if (element['type'] == 'way') {
         final Map<String, dynamic> tags = Map<String, dynamic>.from(
@@ -250,7 +319,7 @@ class CourseParser {
         // 解析坐标路径
         List<LatLng> polyline = [];
         if (element['geometry'] != null) {
-          // 如果查询用了 out geom
+          // if overpass ql:out geom
           polyline = (element['geometry'] as List)
               .map((g) => LatLng(g['lat'].toDouble(), g['lon'].toDouble()))
               .toList();
@@ -276,7 +345,7 @@ class CourseParser {
     print('json parsed: allFeatures len: ${allFeatures.length}');
     print('allFeatures: ${allFeatures.toString()}');
 
-    // 4. 第二次处理：识别 Hole (球洞)
+    // cyecle #2：识别 Hole (球洞)
     // 注意：有些数据标记 golf=hole 在 Way 上，有些在 Relation 上
     for (var element in elements) {
       if (element['type'] == 'way' || element['type'] == 'relation') {
@@ -286,23 +355,21 @@ class CourseParser {
           final hole = _parseHole(element, allFeatures, nodeTags, allNodes);
           if (hole != null) holes.add(hole);
         }
-      }
+        // Tee as 'way'
+        else if (tags['golf'] == 'tee' || tags['type'] == 'tee') {
+          print ('tee as way: found');
+        }
+        // TODO/way: fairway, green, water_hazard, cartpath, clubhouse
     }
-    print('json parsed: cycle 2: holes len: ${holes.length}');
+    print('json parsed: cycle 2: holes count: ${holes.length}');
 
-    // 如果没有明确的 hole relation，可以尝试从 features 里的 tags 推断球洞
-    if (holes.isEmpty) {
-      _inferHolesFromFeatures(allFeatures, holes, allNodes);
-    }
-
-    // 按球洞编号排序
+    // 球洞排序
     holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
-    print('json parsed: cycle 3: holes len: ${holes.length}');
+    //print('json parsed: cycle 3: holes count: ${holes.length}');
 
-    // 5. 计算球场中心点 (取所有 Node 的平均值)
+    // 计算球场中心点 (取所有 Node 的平均值)
     LatLng center = _calculateCenter(nodeCoordinates.values.toList());
-
-    return GolfCourse(
+    return Course(
       id: "course_${DateTime.now().millisecondsSinceEpoch}",
       name: courseName,
       location: center,
@@ -312,7 +379,7 @@ class CourseParser {
     );
   }
 
-  // 计算中心点助手函数
+  // helper: 计算course中心点
   static LatLng _calculateCenter(List<LatLng> points) {
     if (points.isEmpty) return LatLng(0, 0);
     double lat = 0;
@@ -324,7 +391,7 @@ class CourseParser {
     return LatLng(lat / points.length, lon / points.length);
   }
 
-  // 从 Way 或 Relation 解析球洞逻辑
+  // 从Way/Relation解析球洞逻辑
   static Hole? _parseHole(
     dynamic element,
     List<Way> allFeatures,
@@ -333,56 +400,6 @@ class CourseParser {
   ) {
     final wayId = element['id'];
     final way = allFeatures.firstWhere((w) => w.id == wayId);
-    return Hole.fromWay(way, nodeTags, allNodes);
-  }
-
-  // 兜底方案：如果没有 hole relation，将所有标记了 ref 的 feature 归类
-  static void _inferHolesFromFeatures(
-    List<Way> features,
-    List<Hole> holes,
-    List<Node> allNodes,
-  ) {
-    final Map<int, List<Way>> holesFeatures = {};
-    for (var feature in features) {
-      if (feature.tags.containsKey('ref')) {
-        final holeNum = int.tryParse(feature.tags['ref']);
-        if (holeNum != null) {
-          if (!holesFeatures.containsKey(holeNum)) {
-            holesFeatures[holeNum] = [];
-          }
-          holesFeatures[holeNum]!.add(feature);
-        }
-      }
-    }
-
-    for (var holeNum in holesFeatures.keys) {
-      final ways = holesFeatures[holeNum]!;
-      LatLng? pin;
-      final List<Tee> tees = [];
-      int par = 0;
-
-      for (var way in ways) {
-        for (var nodeId in way.nodeIds) {
-          final node = allNodes.firstWhere((n) => n.id == nodeId);
-          if (node.tags['golf'] == 'tee') {
-            tees.add(
-              Tee(
-                color: node.tags['tee'] ?? 'white',
-                position: LatLng(node.lat, node.lon),
-              ),
-            );
-          }
-        }
-        if (way.tags['golf'] == 'pin') {
-          pin = way.points.first;
-        } else if (way.tags.containsKey('par')) {
-          par = int.tryParse(way.tags['par']) ?? 0;
-        }
-      }
-
-      if (pin != null && par > 0) {
-        holes.add(Hole(holeNumber: holeNum, par: par, pin: pin, tees: tees));
-      }
-    }
+    return Hole.fromWay(element, way, nodeTags, allNodes);
   }
 }
