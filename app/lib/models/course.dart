@@ -2,71 +2,83 @@ import 'package:latlong2/latlong.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:convert';
 import 'package:collection/collection.dart';
+import 'package:dart_jts/dart_jts.dart' as jts;
 import 'overpass.dart';
+import 'jts.dart';
+
+// for a course, info for a named/colored tee. e.g. black: 5380y par: 72 courseRatings: 110.2 slopeRatings:
+class TeeInfo {
+  final String name;
+  final String color; // name or color. pro, black, lady red, man white, man red
+  final double yardage; // total distance. all holes combined
+  final double courseRating;
+  final double slopeRating;
+
+  TeeInfo({
+    required this.name,
+    required this.color,
+    this.yardage = 0.0,
+    this.courseRating = 0.0,
+    this.slopeRating = 0.0,
+  });
+
+  @override
+  String toString() {
+    return 'TeeInfo: $color, $yardage, course rating: $courseRating, slope rating: $slopeRating\n';
+  }
+}
+
+// tee box (a point) & tee platform (a rect) for a hole
+class TeeBox {
+  final LatLng position;
+  TeeBox({required this.position});
+}
+
+class TeePlatform {
+  final jts.Polygon polygon;
+  // final List<Tee> tees;
+
+  TeePlatform({required this.polygon});
+
+  @override
+  String toString() {
+    return 'TeePlatform: XXX';
+  }
+
+  // arg Way: the specific Way object we want to parse as tee
+  static TeePlatform? fromWay(Way way) {}
+}
+
+class Fairway {
+  final List<Node> nodes;
+
+  Fairway({required this.nodes});
+
+  static Fairway? fromWay(Way way) {
+    return null; // TODO: Implement fairway parsing
+  }
+}
 
 class Bunker {}
+
 class Hazard {}
 
-// overpass:way with tags:golf=pin
 class Green {
-  final List<Node> allNodes;
-  final Boundary bounary ;
+  final List<Node> nodes;
+
+  Green({required this.nodes});
 
   static Green? fromWay(
     dynamic element,
     Way way,
     Map<int, Map<String, dynamic>> nodeTags,
-    List<Node> allNodes,
+    List<Node> nodes,
   ) {
-      final bounds = LatLngBounds(
-        LatLng(40.712, -74.006), 
-        LatLng(40.730, -73.935)
-      );
-  }
-}
-
-class Fairway {
-  final List<Node> allNodes;
-
-  static Fairway? fromWay(
-    dynamic element,
-    Way way) {
-  }
-}
-
-
-class Tee {
-  final String color;
-  final double distance;
-  final double courseRating;
-  final double slopeRating;
-  final LatLng position;
-
-  Tee({
-    required this.color,
-    this.distance = 0.0,
-    this.courseRating = 0.0,
-    this.slopeRating = 0.0,
-    required this.position,
-  });
-
-  @override
-  String toString() {
-    return 'Tee: $color, $distance, course rating: $courseRating, slope rating: $slopeRating\n';
-  }
-
-  static Tee? fromWay(
-    dynamic element,
-    Way way,
-    Map<int, Map<String, dynamic>> nodeTags,
-    List<Node> allNodes,
-  ) {
-      // XXX
-      final bounds = LatLngBounds(
-        LatLng(40.712, -74.006), 
-        LatLng(40.730, -73.935)
-      );
-
+    final bounds = LatLngBounds(
+      LatLng(40.712, -74.006),
+      LatLng(40.730, -73.935),
+    );
+    return null; // TODO: Implement green parsing
   }
 }
 
@@ -77,10 +89,10 @@ class Hole {
   final LatLng pin;
 
   final LatLng boundMin, boundMax;
-  final boundary;
-  final List<Tee> tees;
-  final Fairway fairway; // list ???
-  final Green green;
+  final List<TeeBox> tees;
+  final List<Fairway> fairways;
+  // japan/double-grenen: different glass for different season.
+  final List<Green> greens;
 
   Hole({
     required this.holeNumber,
@@ -88,16 +100,15 @@ class Hole {
     this.handicapIndex = 0,
     required this.pin,
     this.tees = const [],
+    this.fairways = const [],
+    this.greens = const [],
     required this.boundMin,
     required this.boundMax,
   });
 
-  static Hole? fromWay(
-    dynamic element,
-    Way way,
-    Map<int, Map<String, dynamic>> nodeTags,
-    List<Node> allNodes,
-  ) {
+  // arg Way: the specific Way object we want to parse as hole
+  // arg overpass: whole overpass object from json
+  static Hole? fromWay(Way way, Overpass overpass) {
     // for type:way/golf:hole, ref is hole number
     if (!way.tags.containsKey('ref')) {
       return null;
@@ -106,20 +117,36 @@ class Hole {
     final par = int.parse(way.tags['par'] ?? '0');
     final handicapIndex = int.parse(way.tags['handicap'] ?? '0');
 
-    // bounds
-    final bounds = element['bounds'];
-    final LatLng boundMin = LatLng(
-      bounds['minlat'] ?? 0.0,
-      bounds['minlon'] ?? 0.0,
-    );
-    final LatLng boundMax = LatLng(
-      bounds['maxlat'] ?? 0.0,
-      bounds['maxlon'] ?? 0.0,
-    );
+    // bounds - use way bounds if available, otherwise create from points
+    LatLng boundMin, boundMax;
+    if (way.bounds != null) {
+      boundMin = way.bounds!.southWest;
+      boundMax = way.bounds!.northEast;
+    } else if (way.points.isNotEmpty) {
+      // Calculate bounds from points
+      double minLat = way.points[0].latitude;
+      double minLon = way.points[0].longitude;
+      double maxLat = way.points[0].latitude;
+      double maxLon = way.points[0].longitude;
+
+      for (final point in way.points) {
+        if (point.latitude < minLat) minLat = point.latitude;
+        if (point.longitude < minLon) minLon = point.longitude;
+        if (point.latitude > maxLat) maxLat = point.latitude;
+        if (point.longitude > maxLon) maxLon = point.longitude;
+      }
+
+      boundMin = LatLng(minLat, minLon);
+      boundMax = LatLng(maxLat, maxLon);
+    } else {
+      // No bounds available
+      boundMin = LatLng(0.0, 0.0);
+      boundMax = LatLng(0.0, 0.0);
+    }
 
     // pin/tee
     LatLng? pin;
-    List<Tee> tees = [];
+    List<TeeBox> tees = [];
     print(
       '  - Processing hole ${way.tags["ref"]} with ${way.nodeIds.length} nodes.',
     );
@@ -127,7 +154,7 @@ class Hole {
       final nodeId = way.nodeIds[i];
 
       // nodes list. lj: overpass out geom does NOT include all nodes
-      final Node? node = allNodes.firstWhereOrNull((n) => n.id == nodeId);
+      final Node? node = overpass.nodes.firstWhereOrNull((n) => n.id == nodeId);
       if (node != null) {
         print('    - Node ${node.id} tags: ${node.tags}');
         // node for pin/tee
@@ -135,9 +162,7 @@ class Hole {
           pin = node.toLatLng();
           print('      - Found pin at ${pin}');
         } else if (node.tags['golf'] == 'tee') {
-          final tee = Tee(
-            color: node.tags['tee'] ?? 'white',
-            distance: double.parse(node.tags['distance'] ?? '0'),
+          final tee = TeeBox(
             position: node.toLatLng(),
           );
           print('      - Found tee at ${tee}');
@@ -157,6 +182,8 @@ class Hole {
       handicapIndex: handicapIndex,
       pin: pin,
       tees: tees,
+      fairways: [], // TODO: Extract fairways from overpass data
+      greens: [], // TODO: Extract greens from overpass data
       boundMin: boundMin,
       boundMax: boundMax,
     );
@@ -164,76 +191,95 @@ class Hole {
 
   @override
   String toString() {
-    return 'Hole: $holeNumber, par: $par, hcp: $handicapIndex, pin: $pin, tees: ${tees.toString()}\n';
+    return 'Hole: $holeNumber, par: $par, hcp: $handicapIndex, pin: $pin, tees: ${tees.toString()}';
   }
 }
 
-// course
-// ---------
 class Course {
   final String id;
   final String name;
+  final Overpass overpass;
 
-  final List<Node> nodes;
-  final List<Way> ways;
-  final List<Relation> relations;
+  final jts.Polygon boundary;
+  final List<TeeInfo> teeInfos;
+
   final List<Hole> holes;
-  // final boundary;
-  // final tags; // addr/phone etc
+  // final List<Fairway> fairways;
+  // final List<Tee> tees;
+  // bunker, hazard,
+  // addr/phone etc. in tags
   // facility e.g. clubhouse/cartpath
 
   Course({
     required this.id,
     required this.name,
-    this.nodes = const [],
-    this.ways = const <Way> [],
-    this.relations = const <Relation> [],
+    required this.overpass,
+    required this.boundary,
+    this.teeInfos = const [],
     this.holes = const [],
   });
 
   static Course fromJson(String json) {
-    final Map<String, dynamic> data = json.decode(jsonString);
-    final List<dynamic> elements = data['elements'];
-    print('json parsed: elements num: ${elements.length}');
+    final overpass = Overpass.fromJson(json);
 
-    final Map<int, LatLng> nodeCoordinates = {};
-    final Map<int, Map<String, dynamic>> nodeTags = {};
+    // Find the main golf course way for boundary and course info
+    final golfCourseWay = overpass.ways.firstWhere(
+      (way) => way.tags['leisure'] == 'golf_course',
+      orElse: () => throw Exception('No golf course way found in data'),
+    );
 
-    final List<Node> allNodes = [];
-    final List<Way> allWays= [];
-    final List<Relation> allRelations = [];
-    final List<Hole> allHoles= [];
+    // Extract course name and ID
+    final courseName = golfCourseWay.tags['name'] as String? ?? 'Unknown Golf Course';
+    final courseId = 'course_${golfCourseWay.id}';
 
-    // node/way
-    for (var element in elements) {
-      if (element['type'] == 'node') {
-        final int id = element['id'];
-        final double lat = element['lat'];
-        final double lon = element['lon'];
-        final LatLng position = LatLng(lat, lon);
+    // Create course boundary polygon
+    final boundary = golfCourseWay.polygon ??
+        (golfCourseWay.points.isNotEmpty
+            ? JtsHelper.fromLatLngPoints(golfCourseWay.points)
+            : throw Exception('Golf course way has no valid polygon or points'));
 
-        final node = Node.fromJson(element);
-        allNodes.add(node); 
-      } else if (element['type'] == 'way') {
-        final way = Way.fromJson(element, null);
-        allWays.add(way); 
-      } else if (element['type'] == 'relation') {
-        final relation = Relation.fromJson(element, null);
-        allRelations.add(relation)
+    // Extract holes from ways with golf=hole tag
+    final List<Hole> holes = [];
+    final holeWays = overpass.ways.where((way) => way.tags['golf'] == 'hole').toList();
+
+    for (final holeWay in holeWays) {
+      final hole = Hole.fromWay(holeWay, overpass);
+      if (hole != null) {
+        holes.add(hole);
       }
-    } // for
+    }
 
-    // hole
-    for (var way in allWays) {
+    // Sort holes by hole number
+    holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
+
+    // Extract tee information (basic implementation)
+    final List<TeeInfo> teeInfos = [];
+    final teeWays = overpass.ways.where((way) => way.tags['golf'] == 'tee').toList();
+    final teeColors = <String>{};
+
+    for (final teeWay in teeWays) {
+      final color = teeWay.tags['tee'] as String? ?? 'unknown';
+      teeColors.add(color);
+    }
+
+    // Create TeeInfo objects for each unique color found
+    for (final color in teeColors) {
+      teeInfos.add(TeeInfo(
+        name: color,
+        color: color,
+        yardage: 0.0, // Would need to calculate from hole distances
+        courseRating: 0.0, // Not available in basic Overpass data
+        slopeRating: 0.0, // Not available in basic Overpass data
+      ));
     }
 
     return Course(
-      id: "course_${DateTime.now().millisecondsSinceEpoch}",
-      name: "XXX",
-      nodes: allNodes,
-      ways: allWays,
-      relations: allRelations,
-      holes: allHoles,
+      id: courseId,
+      name: courseName,
+      overpass: overpass,
+      boundary: boundary,
+      teeInfos: teeInfos,
+      holes: holes,
     );
-  } // fromJson
+  }
 }
