@@ -73,7 +73,7 @@ out geom;
       );
 
       if (response.statusCode == 200) {
-        final golfCourse = Course.fromJson(response.body, widget.courseName);
+        final golfCourse = Course.fromJson(response.body);
 
         // if (golfCourse.holes.isNotEmpty) {
         await file.writeAsString(response.body);
@@ -123,7 +123,7 @@ out geom;
     if (await file.exists()) {
       try {
         final jsonString = await file.readAsString();
-        final golfCourse = Course.fromJson(jsonString, widget.courseName);
+        final golfCourse = Course.fromJson(jsonString);
         final player = Player(name: 'Rick');
         setState(() {
           _round = Round(
@@ -290,13 +290,14 @@ out geom;
               PolygonLayer(
                 // --- course border ---
                 polygons: [
-                  for (var feature in _round!.course.features)
-                    Polygon(
-                      points: feature.points,
-                      color: _getColorForFeature(feature.tags['golf']),
-                      borderColor: Colors.white,
-                      borderStrokeWidth: 1,
-                    ),
+                  for (final hole in _round!.course.holes)
+                    for (final fw in hole.fairways)
+                      Polygon(
+                        points: fw.points,
+                        color: _getColorForFeature(fw.tags['golf']),
+                        borderColor: Colors.white,
+                        borderStrokeWidth: 1,
+                      ),
                 ],
               ),
               if (_currentPlayerPos != null) // --- curr pos ---
@@ -553,7 +554,7 @@ out geom;
     // 1. 基础点集：包含旗杆和发球台
     final List<LatLng> points = [
       hole.pin,
-      ...hole.tees.map((Tee t) => t.position),
+      ...hole.tees.map((TeeBox t) => t.position),
     ];
     debugPrint(
       'points: \n${points.map((p) => "(${p.latitude}, ${p.longitude})").join("\n")}',

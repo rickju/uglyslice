@@ -1,6 +1,5 @@
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:dart_jts/dart_jts.dart' as jts;
 import 'overpass.dart';
