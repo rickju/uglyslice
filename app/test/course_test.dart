@@ -175,32 +175,51 @@ void main() {
       final jsonString = await file.readAsString();
       final course = Course.fromJson(jsonString);
 
-      // Verify basic course info
       expect(course.name, equals('Karori Golf Club'));
       expect(course.id, equals('course_747473941'));
-
-      // Verify boundary polygon exists
       expect(course.boundary, isNotNull);
       expect(course.boundary.getArea(), greaterThan(0));
-
-      // Should have some tee info from the tee ways
       expect(course.teeInfos, isNotEmpty);
-      print('Karori tee info count: ${course.teeInfos.length}');
-
-      // Note: Karori doesn't have hole ways with ref tags, so holes will be empty
-      // This is expected for this dataset
-      print('Karori holes count: ${course.holes.length}');
-
-      // Verify overpass data is preserved
       expect(course.overpass.nodes, isNotEmpty);
       expect(course.overpass.ways, isNotEmpty);
+    }, timeout: const Timeout(Duration(seconds: 10)));
 
-      print('Karori Course parsed successfully:');
-      print('  - Name: ${course.name}');
-      print('  - ID: ${course.id}');
-      print('  - Boundary area: ${course.boundary.getArea()} sq degrees');
-      print('  - Tee info types: ${course.teeInfos.length}');
-      print('  - Holes: ${course.holes.length}');
+    test('Karori holes have correct fairways assigned', () async {
+      final file = File('karori.json');
+      if (!await file.exists()) {
+        markTestSkipped('karori.json file not found');
+        return;
+      }
+
+      final jsonString = await file.readAsString();
+      final course = Course.fromJson(jsonString);
+
+      expect(course.holes, hasLength(18));
+
+      final byNum = {for (final h in course.holes) h.holeNumber: h};
+
+      // Print for diagnostics
+      for (final h in course.holes) {
+        print('Hole ${h.holeNumber}: ${h.fairways.length} fairway(s)');
+      }
+
+      // Holes with a fairway assigned via spatial containment
+      for (final n in [1, 3, 5, 7, 8, 9, 10, 12, 14, 16, 18]) {
+        expect(
+          byNum[n]!.fairways,
+          hasLength(1),
+          reason: 'Hole $n should have 1 fairway',
+        );
+      }
+
+      // Par-3 and other holes whose fairway centroid falls outside the hole polygon
+      for (final n in [2, 4, 6, 11, 13, 15, 17]) {
+        expect(
+          byNum[n]!.fairways,
+          isEmpty,
+          reason: 'Hole $n should have no fairways',
+        );
+      }
     }, timeout: const Timeout(Duration(seconds: 10)));
   });
 }

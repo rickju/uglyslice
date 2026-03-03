@@ -94,18 +94,13 @@ class Fairway {
   /// Legacy method for backward compatibility
   static Fairway? fromWay(Way way) {
     // Convert Way to JSON-like format and use fromJson
-    final wayData = {
-      'type': 'way',
-      'id': way.id,
-      'tags': way.tags,
-    };
+    final wayData = {'type': 'way', 'id': way.id, 'tags': way.tags};
 
     // Add geometry if points are available
     if (way.points.isNotEmpty) {
-      wayData['geometry'] = way.points.map((point) => {
-        'lat': point.latitude,
-        'lon': point.longitude,
-      }).toList();
+      wayData['geometry'] = way.points
+          .map((point) => {'lat': point.latitude, 'lon': point.longitude})
+          .toList();
     }
 
     // Add bounds if available
@@ -140,61 +135,22 @@ class Fairway {
 
 class Bunker {
   final int id;
-  final List<LatLng> points;
   final Map<String, dynamic> tags;
-  final LatLngBounds? bounds;
   final jts.Polygon? polygon;
-  final List<Node> nodes;
 
-  Bunker({
-    required this.id,
-    required this.points,
-    required this.tags,
-    this.bounds,
-    this.polygon,
-    this.nodes = const [],
-  });
+  Bunker({required this.id, required this.tags, this.polygon});
 
-  /// Creates a Bunker from JSON data (from Overpass API response)
-  static Bunker? fromJson(Map<String, dynamic> json) {
-    // Validate this is a way with golf=bunker tag
-    if (json['type'] != 'way' || json['tags']?['golf'] != 'bunker') {
-      return null;
-    }
+  static Bunker? fromWay(Way way) => null;
 
-    // Use Way.fromJson to handle all the parsing logic
-    final way = Way.fromJson(json, null);
+  double? getArea() => polygon?.getArea();
 
-    if (way.points.length < 3) {
-      // Can't create a bunker with less than 3 points
-      return null;
-    }
-
-    return Bunker(
-      id: way.id,
-      points: way.points,
-      tags: way.tags,
-      bounds: way.bounds,
-      polygon: way.polygon,
-      nodes: [], // Empty for geometry-based bunkers
-    );
-  }
-
-  /// Calculates the area of the bunker in square degrees
-  double? getArea() {
-    return polygon?.getArea();
-  }
-
-  /// Checks if a point is inside this bunker
   bool containsPoint(LatLng point) {
     if (polygon == null) return false;
     return JtsHelper.pointInPolygon(point, polygon!);
   }
 
   @override
-  String toString() {
-    return 'Bunker(id: $id, points: ${points.length}, area: ${getArea()?.toStringAsFixed(8) ?? 'unknown'} sq degrees)';
-  }
+  String toString() => 'Bunker(id: $id)';
 }
 
 class Hazard {
@@ -214,34 +170,7 @@ class Hazard {
     this.nodes = const [],
   });
 
-  /// Creates a Hazard from JSON data (from Overpass API response)
-  static Hazard? fromJson(Map<String, dynamic> json) {
-    // Validate this is a way with golf hazard tags (water_hazard, lateral_water_hazard, etc.)
-    final golfTag = json['tags']?['golf'];
-    if (json['type'] != 'way' ||
-        (golfTag != 'water_hazard' &&
-         golfTag != 'lateral_water_hazard' &&
-         golfTag != 'hazard')) {
-      return null;
-    }
-
-    // Use Way.fromJson to handle all the parsing logic
-    final way = Way.fromJson(json, null);
-
-    if (way.points.length < 3) {
-      // Can't create a hazard with less than 3 points
-      return null;
-    }
-
-    return Hazard(
-      id: way.id,
-      points: way.points,
-      tags: way.tags,
-      bounds: way.bounds,
-      polygon: way.polygon,
-      nodes: [], // Empty for geometry-based hazards
-    );
-  }
+  static Hazard? fromWay(Way way) {}
 
   /// Calculates the area of the hazard in square degrees
   double? getArea() {
@@ -283,64 +212,8 @@ class Green {
     this.nodes = const [],
   });
 
-  /// Creates a Green from JSON data (from Overpass API response)
-  static Green? fromJson(Map<String, dynamic> json) {
-    // Validate this is a way with golf=green tag
-    if (json['type'] != 'way' || json['tags']?['golf'] != 'green') {
-      return null;
-    }
-
-    // Use Way.fromJson to handle all the parsing logic
-    final way = Way.fromJson(json, null);
-
-    if (way.points.length < 3) {
-      // Can't create a green with less than 3 points
-      return null;
-    }
-
-    return Green(
-      id: way.id,
-      points: way.points,
-      tags: way.tags,
-      bounds: way.bounds,
-      polygon: way.polygon,
-      nodes: [], // Empty for geometry-based greens
-    );
-  }
-
-  /// Legacy method for backward compatibility
-  static Green? fromWay(
-    dynamic element,
-    Way way,
-    Map<int, Map<String, dynamic>> nodeTags,
-    List<Node> nodes,
-  ) {
-    // Convert Way to JSON-like format and use fromJson
-    final wayData = {
-      'type': 'way',
-      'id': way.id,
-      'tags': way.tags,
-    };
-
-    // Add geometry if points are available
-    if (way.points.isNotEmpty) {
-      wayData['geometry'] = way.points.map((point) => {
-        'lat': point.latitude,
-        'lon': point.longitude,
-      }).toList();
-    }
-
-    // Add bounds if available
-    if (way.bounds != null) {
-      wayData['bounds'] = {
-        'minlat': way.bounds!.southWest.latitude,
-        'minlon': way.bounds!.southWest.longitude,
-        'maxlat': way.bounds!.northEast.latitude,
-        'maxlon': way.bounds!.northEast.longitude,
-      };
-    }
-
-    return fromJson(wayData);
+  static Green? fromWay(Way way) {
+    // XXX
   }
 
   /// Calculates the area of the green in square degrees
@@ -425,32 +298,36 @@ class Hole {
     // pin/tee
     LatLng? pin;
     List<TeeBox> tees = [];
-    print(
-      '  - Processing hole ${way.tags["ref"]} with ${way.nodeIds.length} nodes.',
-    );
-    for (var i = 0; i < way.nodeIds.length; i++) {
-      final nodeId = way.nodeIds[i];
 
-      // nodes list. lj: overpass out geom does NOT include all nodes
-      final Node? node = overpass.nodes.firstWhereOrNull((n) => n.id == nodeId);
-      if (node != null) {
-        print('    - Node ${node.id} tags: ${node.tags}');
-        // node for pin/tee
-        if (node.tags['golf'] == 'pin') {
-          pin = node.toLatLng();
-          print('      - Found pin at ${pin}');
-        } else if (node.tags['golf'] == 'tee') {
-          final tee = TeeBox(
-            position: node.toLatLng(),
-          );
-          print('      - Found tee at ${tee}');
-          tees.add(tee);
-        }
+    void matchNode(Node node) {
+      if (node.tags['golf'] == 'pin') {
+        pin = node.toLatLng();
+      } else if (node.tags['golf'] == 'tee') {
+        tees.add(TeeBox(position: node.toLatLng()));
+      }
+    }
+
+    if (way.nodeIds.isNotEmpty) {
+      // Way was parsed with nodes array — cross-reference by ID
+      for (final nodeId in way.nodeIds) {
+        final node = overpass.nodes.firstWhereOrNull((n) => n.id == nodeId);
+        if (node != null) matchNode(node);
+      }
+    } else if (way.points.isNotEmpty) {
+      // Way was parsed from geometry (out geom) — match tagged nodes by position
+      const tolerance = 1e-7;
+      for (final node in overpass.nodes) {
+        if (!node.tags.containsKey('golf')) continue;
+        final bool onWay = way.points.any(
+          (p) =>
+              (p.latitude - node.lat).abs() < tolerance &&
+              (p.longitude - node.lon).abs() < tolerance,
+        );
+        if (onWay) matchNode(node);
       }
     }
 
     if (pin == null) {
-      print('  - Pin not found for hole ${way.tags["ref"]}');
       return null;
     }
 
@@ -458,7 +335,7 @@ class Hole {
       holeNumber: holeNumber,
       par: par,
       handicapIndex: handicapIndex,
-      pin: pin,
+      pin: pin!,
       tees: tees,
       fairways: [], // TODO: Extract fairways from overpass data
       greens: [], // TODO: Extract greens from overpass data
@@ -507,18 +384,24 @@ class Course {
     );
 
     // Extract course name and ID
-    final courseName = golfCourseWay.tags['name'] as String? ?? 'Unknown Golf Course';
+    final courseName =
+        golfCourseWay.tags['name'] as String? ?? 'Unknown Golf Course';
     final courseId = 'course_${golfCourseWay.id}';
 
     // Create course boundary polygon
-    final boundary = golfCourseWay.polygon ??
+    final boundary =
+        golfCourseWay.polygon ??
         (golfCourseWay.points.isNotEmpty
             ? JtsHelper.fromLatLngPoints(golfCourseWay.points)
-            : throw Exception('Golf course way has no valid polygon or points'));
+            : throw Exception(
+                'Golf course way has no valid polygon or points',
+              ));
 
     // Extract holes from ways with golf=hole tag
     final List<Hole> holes = [];
-    final holeWays = overpass.ways.where((way) => way.tags['golf'] == 'hole').toList();
+    final holeWays = overpass.ways
+        .where((way) => way.tags['golf'] == 'hole')
+        .toList();
 
     for (final holeWay in holeWays) {
       final hole = Hole.fromWay(holeWay, overpass);
@@ -530,9 +413,66 @@ class Course {
     // Sort holes by hole number
     holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
 
+    // Add fairways to their respective holes
+    final fwWays = overpass.ways
+        .where((way) => way.tags['golf'] == 'fairway')
+        .toList();
+
+    // Build holeNumber -> hole way polygon map for spatial containment fallback
+    final Map<int, jts.Polygon?> holePolygons = {};
+    for (final holeWay in holeWays) {
+      final refStr = holeWay.tags['ref'] as String?;
+      if (refStr == null) continue;
+      final refNum = int.tryParse(refStr);
+      if (refNum == null) continue;
+      holePolygons[refNum] =
+          holeWay.polygon ??
+          (holeWay.points.length >= 3
+              ? JtsHelper.fromLatLngPoints(holeWay.points)
+              : null);
+    }
+
+    // Build holeNumber -> Hole map for quick lookup
+    final Map<int, Hole> holeByNumber = {
+      for (final hole in holes) hole.holeNumber: hole,
+    };
+
+    for (final way in fwWays) {
+      final fw = Fairway.fromWay(way);
+      if (fw == null) continue;
+
+      bool assigned = false;
+
+      // Match by ref tag (explicit hole number)
+      final refStr = way.tags['ref'] as String?;
+      if (refStr != null) {
+        final refNum = int.tryParse(refStr);
+        if (refNum != null && holeByNumber.containsKey(refNum)) {
+          holeByNumber[refNum]!.fairways.add(fw);
+          assigned = true;
+        }
+      }
+
+      // Fallback: spatial containment — fairway centroid inside hole polygon
+      if (!assigned && fw.polygon != null) {
+        final centroid = fw.polygon!.getCentroid();
+        final centroidLatLng = LatLng(centroid.getY(), centroid.getX());
+        for (final hole in holes) {
+          final holePoly = holePolygons[hole.holeNumber];
+          if (holePoly != null &&
+              JtsHelper.pointInPolygon(centroidLatLng, holePoly)) {
+            hole.fairways.add(fw);
+            break;
+          }
+        }
+      }
+    }
+
     // Extract tee information (basic implementation)
     final List<TeeInfo> teeInfos = [];
-    final teeWays = overpass.ways.where((way) => way.tags['golf'] == 'tee').toList();
+    final teeWays = overpass.ways
+        .where((way) => way.tags['golf'] == 'tee')
+        .toList();
     final teeColors = <String>{};
 
     for (final teeWay in teeWays) {
@@ -542,13 +482,15 @@ class Course {
 
     // Create TeeInfo objects for each unique color found
     for (final color in teeColors) {
-      teeInfos.add(TeeInfo(
-        name: color,
-        color: color,
-        yardage: 0.0, // Would need to calculate from hole distances
-        courseRating: 0.0, // Not available in basic Overpass data
-        slopeRating: 0.0, // Not available in basic Overpass data
-      ));
+      teeInfos.add(
+        TeeInfo(
+          name: color,
+          color: color,
+          yardage: 0.0, // Would need to calculate from hole distances
+          courseRating: 0.0, // Not available in basic Overpass data
+          slopeRating: 0.0, // Not available in basic Overpass data
+        ),
+      );
     }
 
     return Course(
