@@ -50,35 +50,313 @@ class TeePlatform {
 }
 
 class Fairway {
+  final int id;
+  final List<LatLng> points;
+  final Map<String, dynamic> tags;
+  final LatLngBounds? bounds;
+  final jts.Polygon? polygon;
   final List<Node> nodes;
 
-  Fairway({required this.nodes});
+  Fairway({
+    required this.id,
+    required this.points,
+    required this.tags,
+    this.bounds,
+    this.polygon,
+    this.nodes = const [],
+  });
 
+  /// Creates a Fairway from JSON data (from Overpass API response)
+  static Fairway? fromJson(Map<String, dynamic> json) {
+    // Validate this is a way with golf=fairway tag
+    if (json['type'] != 'way' || json['tags']?['golf'] != 'fairway') {
+      return null;
+    }
+
+    // Use Way.fromJson to handle all the parsing logic
+    final way = Way.fromJson(json, null);
+
+    if (way.points.length < 3) {
+      // Can't create a fairway with less than 3 points
+      return null;
+    }
+
+    return Fairway(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+      nodes: [], // Empty for geometry-based fairways
+    );
+  }
+
+  /// Legacy method for backward compatibility
   static Fairway? fromWay(Way way) {
-    return null; // TODO: Implement fairway parsing
+    // Convert Way to JSON-like format and use fromJson
+    final wayData = {
+      'type': 'way',
+      'id': way.id,
+      'tags': way.tags,
+    };
+
+    // Add geometry if points are available
+    if (way.points.isNotEmpty) {
+      wayData['geometry'] = way.points.map((point) => {
+        'lat': point.latitude,
+        'lon': point.longitude,
+      }).toList();
+    }
+
+    // Add bounds if available
+    if (way.bounds != null) {
+      wayData['bounds'] = {
+        'minlat': way.bounds!.southWest.latitude,
+        'minlon': way.bounds!.southWest.longitude,
+        'maxlat': way.bounds!.northEast.latitude,
+        'maxlon': way.bounds!.northEast.longitude,
+      };
+    }
+
+    return fromJson(wayData);
+  }
+
+  /// Calculates the area of the fairway in square degrees
+  double? getArea() {
+    return polygon?.getArea();
+  }
+
+  /// Checks if a point is inside this fairway
+  bool containsPoint(LatLng point) {
+    if (polygon == null) return false;
+    return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  @override
+  String toString() {
+    return 'Fairway(id: $id, points: ${points.length}, area: ${getArea()?.toStringAsFixed(8) ?? 'unknown'} sq degrees)';
   }
 }
 
-class Bunker {}
-
-class Hazard {}
-
-class Green {
+class Bunker {
+  final int id;
+  final List<LatLng> points;
+  final Map<String, dynamic> tags;
+  final LatLngBounds? bounds;
+  final jts.Polygon? polygon;
   final List<Node> nodes;
 
-  Green({required this.nodes});
+  Bunker({
+    required this.id,
+    required this.points,
+    required this.tags,
+    this.bounds,
+    this.polygon,
+    this.nodes = const [],
+  });
 
+  /// Creates a Bunker from JSON data (from Overpass API response)
+  static Bunker? fromJson(Map<String, dynamic> json) {
+    // Validate this is a way with golf=bunker tag
+    if (json['type'] != 'way' || json['tags']?['golf'] != 'bunker') {
+      return null;
+    }
+
+    // Use Way.fromJson to handle all the parsing logic
+    final way = Way.fromJson(json, null);
+
+    if (way.points.length < 3) {
+      // Can't create a bunker with less than 3 points
+      return null;
+    }
+
+    return Bunker(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+      nodes: [], // Empty for geometry-based bunkers
+    );
+  }
+
+  /// Calculates the area of the bunker in square degrees
+  double? getArea() {
+    return polygon?.getArea();
+  }
+
+  /// Checks if a point is inside this bunker
+  bool containsPoint(LatLng point) {
+    if (polygon == null) return false;
+    return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  @override
+  String toString() {
+    return 'Bunker(id: $id, points: ${points.length}, area: ${getArea()?.toStringAsFixed(8) ?? 'unknown'} sq degrees)';
+  }
+}
+
+class Hazard {
+  final int id;
+  final List<LatLng> points;
+  final Map<String, dynamic> tags;
+  final LatLngBounds? bounds;
+  final jts.Polygon? polygon;
+  final List<Node> nodes;
+
+  Hazard({
+    required this.id,
+    required this.points,
+    required this.tags,
+    this.bounds,
+    this.polygon,
+    this.nodes = const [],
+  });
+
+  /// Creates a Hazard from JSON data (from Overpass API response)
+  static Hazard? fromJson(Map<String, dynamic> json) {
+    // Validate this is a way with golf hazard tags (water_hazard, lateral_water_hazard, etc.)
+    final golfTag = json['tags']?['golf'];
+    if (json['type'] != 'way' ||
+        (golfTag != 'water_hazard' &&
+         golfTag != 'lateral_water_hazard' &&
+         golfTag != 'hazard')) {
+      return null;
+    }
+
+    // Use Way.fromJson to handle all the parsing logic
+    final way = Way.fromJson(json, null);
+
+    if (way.points.length < 3) {
+      // Can't create a hazard with less than 3 points
+      return null;
+    }
+
+    return Hazard(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+      nodes: [], // Empty for geometry-based hazards
+    );
+  }
+
+  /// Calculates the area of the hazard in square degrees
+  double? getArea() {
+    return polygon?.getArea();
+  }
+
+  /// Checks if a point is inside this hazard
+  bool containsPoint(LatLng point) {
+    if (polygon == null) return false;
+    return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  /// Gets the hazard type (water_hazard, lateral_water_hazard, etc.)
+  String? getHazardType() {
+    return tags['golf'] as String?;
+  }
+
+  @override
+  String toString() {
+    final hazardType = getHazardType() ?? 'unknown';
+    return 'Hazard(id: $id, type: $hazardType, points: ${points.length}, area: ${getArea()?.toStringAsFixed(8) ?? 'unknown'} sq degrees)';
+  }
+}
+
+class Green {
+  final int id;
+  final List<LatLng> points;
+  final Map<String, dynamic> tags;
+  final LatLngBounds? bounds;
+  final jts.Polygon? polygon;
+  final List<Node> nodes;
+
+  Green({
+    required this.id,
+    required this.points,
+    required this.tags,
+    this.bounds,
+    this.polygon,
+    this.nodes = const [],
+  });
+
+  /// Creates a Green from JSON data (from Overpass API response)
+  static Green? fromJson(Map<String, dynamic> json) {
+    // Validate this is a way with golf=green tag
+    if (json['type'] != 'way' || json['tags']?['golf'] != 'green') {
+      return null;
+    }
+
+    // Use Way.fromJson to handle all the parsing logic
+    final way = Way.fromJson(json, null);
+
+    if (way.points.length < 3) {
+      // Can't create a green with less than 3 points
+      return null;
+    }
+
+    return Green(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+      nodes: [], // Empty for geometry-based greens
+    );
+  }
+
+  /// Legacy method for backward compatibility
   static Green? fromWay(
     dynamic element,
     Way way,
     Map<int, Map<String, dynamic>> nodeTags,
     List<Node> nodes,
   ) {
-    final bounds = LatLngBounds(
-      LatLng(40.712, -74.006),
-      LatLng(40.730, -73.935),
-    );
-    return null; // TODO: Implement green parsing
+    // Convert Way to JSON-like format and use fromJson
+    final wayData = {
+      'type': 'way',
+      'id': way.id,
+      'tags': way.tags,
+    };
+
+    // Add geometry if points are available
+    if (way.points.isNotEmpty) {
+      wayData['geometry'] = way.points.map((point) => {
+        'lat': point.latitude,
+        'lon': point.longitude,
+      }).toList();
+    }
+
+    // Add bounds if available
+    if (way.bounds != null) {
+      wayData['bounds'] = {
+        'minlat': way.bounds!.southWest.latitude,
+        'minlon': way.bounds!.southWest.longitude,
+        'maxlat': way.bounds!.northEast.latitude,
+        'maxlon': way.bounds!.northEast.longitude,
+      };
+    }
+
+    return fromJson(wayData);
+  }
+
+  /// Calculates the area of the green in square degrees
+  double? getArea() {
+    return polygon?.getArea();
+  }
+
+  /// Checks if a point is inside this green
+  bool containsPoint(LatLng point) {
+    if (polygon == null) return false;
+    return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  @override
+  String toString() {
+    return 'Green(id: $id, points: ${points.length}, area: ${getArea()?.toStringAsFixed(8) ?? 'unknown'} sq degrees)';
   }
 }
 
