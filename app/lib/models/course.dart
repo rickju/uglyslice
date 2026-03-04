@@ -34,18 +34,35 @@ class TeeBox {
 }
 
 class TeePlatform {
-  final jts.Polygon polygon;
-  // final List<Tee> tees;
+  final int id;
+  final List<LatLng> points;
+  final Map<String, dynamic> tags;
+  final LatLngBounds? bounds;
+  final jts.Polygon? polygon;
 
-  TeePlatform({required this.polygon});
+  TeePlatform({
+    required this.id,
+    required this.points,
+    required this.tags,
+    this.bounds,
+    this.polygon,
+  });
 
-  @override
-  String toString() {
-    return 'TeePlatform: XXX';
+  String? get color => tags['color'] as String?;
+
+  static TeePlatform? fromWay(Way way) {
+    if (way.tags['golf'] != 'tee' || way.points.length < 3) return null;
+    return TeePlatform(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+    );
   }
 
-  // arg Way: the specific Way object we want to parse as tee
-  static TeePlatform? fromWay(Way way) {}
+  @override
+  String toString() => 'TeePlatform(id: $id, color: $color)';
 }
 
 class Fairway {
@@ -54,7 +71,6 @@ class Fairway {
   final Map<String, dynamic> tags;
   final LatLngBounds? bounds;
   final jts.Polygon? polygon;
-  final List<Node> nodes;
 
   Fairway({
     required this.id,
@@ -62,57 +78,17 @@ class Fairway {
     required this.tags,
     this.bounds,
     this.polygon,
-    this.nodes = const [],
   });
 
-  /// Creates a Fairway from JSON data (from Overpass API response)
-  static Fairway? fromJson(Map<String, dynamic> json) {
-    // Validate this is a way with golf=fairway tag
-    if (json['type'] != 'way' || json['tags']?['golf'] != 'fairway') {
-      return null;
-    }
-
-    // Use Way.fromJson to handle all the parsing logic
-    final way = Way.fromJson(json, null);
-
-    if (way.points.length < 3) {
-      // Can't create a fairway with less than 3 points
-      return null;
-    }
-
+  static Fairway? fromWay(Way way) {
+    if (way.tags['golf'] != 'fairway' || way.points.length < 3) return null;
     return Fairway(
       id: way.id,
       points: way.points,
       tags: way.tags,
       bounds: way.bounds,
       polygon: way.polygon,
-      nodes: [], // Empty for geometry-based fairways
     );
-  }
-
-  /// Legacy method for backward compatibility
-  static Fairway? fromWay(Way way) {
-    // Convert Way to JSON-like format and use fromJson
-    final wayData = {'type': 'way', 'id': way.id, 'tags': way.tags};
-
-    // Add geometry if points are available
-    if (way.points.isNotEmpty) {
-      wayData['geometry'] = way.points
-          .map((point) => {'lat': point.latitude, 'lon': point.longitude})
-          .toList();
-    }
-
-    // Add bounds if available
-    if (way.bounds != null) {
-      wayData['bounds'] = {
-        'minlat': way.bounds!.southWest.latitude,
-        'minlon': way.bounds!.southWest.longitude,
-        'maxlat': way.bounds!.northEast.latitude,
-        'maxlon': way.bounds!.northEast.longitude,
-      };
-    }
-
-    return fromJson(wayData);
   }
 
   /// Calculates the area of the fairway in square degrees
@@ -200,7 +176,6 @@ class Green {
   final Map<String, dynamic> tags;
   final LatLngBounds? bounds;
   final jts.Polygon? polygon;
-  final List<Node> nodes;
 
   Green({
     required this.id,
@@ -208,11 +183,17 @@ class Green {
     required this.tags,
     this.bounds,
     this.polygon,
-    this.nodes = const [],
   });
 
   static Green? fromWay(Way way) {
-    // XXX
+    if (way.tags['golf'] != 'green' || way.points.length < 3) return null;
+    return Green(
+      id: way.id,
+      points: way.points,
+      tags: way.tags,
+      bounds: way.bounds,
+      polygon: way.polygon,
+    );
   }
 
   /// Calculates the area of the green in square degrees
@@ -239,7 +220,8 @@ class Hole {
   final LatLng pin;
 
   final LatLng boundMin, boundMax;
-  final List<TeeBox> tees;
+  final List<TeeBox> teeBoxes;
+  final List<TeePlatform> teePlatforms;
   final List<Fairway> fairways;
   // japan/double-grenen: different glass for different season.
   final List<Green> greens;
@@ -249,7 +231,8 @@ class Hole {
     required this.par,
     this.handicapIndex = 0,
     required this.pin,
-    this.tees = const [],
+    this.teeBoxes = const [],
+    this.teePlatforms = const [],
     this.fairways = const [],
     this.greens = const [],
     required this.boundMin,
@@ -294,15 +277,14 @@ class Hole {
       boundMax = LatLng(0.0, 0.0);
     }
 
-    // pin/tee
     LatLng? pin;
-    List<TeeBox> tees = [];
+    List<TeeBox> teeBoxes = [];
 
     void matchNode(Node node) {
       if (node.tags['golf'] == 'pin') {
         pin = node.toLatLng();
       } else if (node.tags['golf'] == 'tee') {
-        tees.add(TeeBox(position: node.toLatLng()));
+        teeBoxes.add(TeeBox(position: node.toLatLng()));
       }
     }
 
@@ -335,9 +317,10 @@ class Hole {
       par: par,
       handicapIndex: handicapIndex,
       pin: pin!,
-      tees: tees,
-      fairways: [], // TODO: Extract fairways from overpass data
-      greens: [], // TODO: Extract greens from overpass data
+      teeBoxes: teeBoxes,
+      teePlatforms: [],
+      fairways: [],
+      greens: [],
       boundMin: boundMin,
       boundMax: boundMax,
     );
@@ -345,7 +328,7 @@ class Hole {
 
   @override
   String toString() {
-    return 'Hole: $holeNumber, par: $par, hcp: $handicapIndex, pin: $pin, tees: ${tees.toString()}';
+    return 'Hole: $holeNumber, par: $par, hcp: $handicapIndex, pin: $pin';
   }
 }
 
@@ -358,8 +341,6 @@ class Course {
   final List<TeeInfo> teeInfos;
 
   final List<Hole> holes;
-  // final List<Fairway> fairways;
-  // final List<Tee> tees;
   // bunker, hazard,
   // addr/phone etc. in tags
   // facility e.g. clubhouse/cartpath
@@ -412,59 +393,104 @@ class Course {
     // Sort holes by hole number
     holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
 
-    // Add fairways to their respective holes
-    final fwWays = overpass.ways
-        .where((way) => way.tags['golf'] == 'fairway')
-        .toList();
-
-    // Build holeNumber -> hole way polygon map for spatial containment fallback
+    // Build shared lookup maps for hole assignment.
+    // Use a padded bounding box — hole ways are routing lines (tee→pin) so
+    // their geometry polygon is degenerate. Padding handles par-3 holes whose
+    // line runs in one direction leaving almost no perpendicular area.
+    const pad = 0.0003; // ~33 m, enough to catch features at box edges
     final Map<int, jts.Polygon?> holePolygons = {};
+    final Map<int, LatLng> holeCentroids = {};
     for (final holeWay in holeWays) {
       final refStr = holeWay.tags['ref'] as String?;
       if (refStr == null) continue;
       final refNum = int.tryParse(refStr);
       if (refNum == null) continue;
-      holePolygons[refNum] =
-          holeWay.polygon ??
-          (holeWay.points.length >= 3
-              ? JtsHelper.fromLatLngPoints(holeWay.points)
-              : null);
+      if (holeWay.bounds != null) {
+        final b = holeWay.bounds!;
+        final minLat = b.southWest.latitude - pad;
+        final minLon = b.southWest.longitude - pad;
+        final maxLat = b.northEast.latitude + pad;
+        final maxLon = b.northEast.longitude + pad;
+        holePolygons[refNum] = JtsHelper.fromLatLngPoints([
+          LatLng(minLat, minLon),
+          LatLng(minLat, maxLon),
+          LatLng(maxLat, maxLon),
+          LatLng(maxLat, minLon),
+        ]);
+        holeCentroids[refNum] = LatLng(
+          (b.southWest.latitude + b.northEast.latitude) / 2,
+          (b.southWest.longitude + b.northEast.longitude) / 2,
+        );
+      } else if (holeWay.points.length >= 3) {
+        holePolygons[refNum] =
+            holeWay.polygon ?? JtsHelper.fromLatLngPoints(holeWay.points);
+      }
     }
-
-    // Build holeNumber -> Hole map for quick lookup
     final Map<int, Hole> holeByNumber = {
       for (final hole in holes) hole.holeNumber: hole,
     };
 
-    for (final way in fwWays) {
-      final fw = Fairway.fromWay(way);
-      if (fw == null) continue;
-
-      bool assigned = false;
-
-      // Match by ref tag (explicit hole number)
-      final refStr = way.tags['ref'] as String?;
+    // Assign a feature to its hole:
+    //   1. by ref tag
+    //   2. by padded bounding box containment
+    //   3. fallback: nearest hole by centroid distance
+    void assignToHole(dynamic feature, void Function(Hole) add) {
+      final refStr = feature.tags['ref'] as String?;
       if (refStr != null) {
         final refNum = int.tryParse(refStr);
         if (refNum != null && holeByNumber.containsKey(refNum)) {
-          holeByNumber[refNum]!.fairways.add(fw);
-          assigned = true;
+          add(holeByNumber[refNum]!);
+          return;
         }
       }
 
-      // Fallback: spatial containment — fairway centroid inside hole polygon
-      if (!assigned && fw.polygon != null) {
-        final centroid = fw.polygon!.getCentroid();
-        final centroidLatLng = LatLng(centroid.getY(), centroid.getX());
-        for (final hole in holes) {
-          final holePoly = holePolygons[hole.holeNumber];
-          if (holePoly != null &&
-              JtsHelper.pointInPolygon(centroidLatLng, holePoly)) {
-            hole.fairways.add(fw);
-            break;
-          }
+      if (feature.polygon == null) return;
+      final centroid = feature.polygon!.getCentroid();
+      final centroidLatLng = LatLng(centroid.getY(), centroid.getX());
+
+      // Padded bounding box containment
+      for (final hole in holes) {
+        final holePoly = holePolygons[hole.holeNumber];
+        if (holePoly != null &&
+            JtsHelper.pointInPolygon(centroidLatLng, holePoly)) {
+          add(hole);
+          return;
         }
       }
+
+      // Fallback: nearest hole by centroid distance
+      Hole? nearest;
+      double minDist = double.infinity;
+      for (final hole in holes) {
+        final hc = holeCentroids[hole.holeNumber];
+        if (hc == null) continue;
+        final dLat = centroidLatLng.latitude - hc.latitude;
+        final dLon = centroidLatLng.longitude - hc.longitude;
+        final dist = dLat * dLat + dLon * dLon;
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = hole;
+        }
+      }
+      if (nearest != null) add(nearest);
+    }
+
+    // Add fairways to their respective holes
+    for (final way in overpass.ways.where((w) => w.tags['golf'] == 'fairway')) {
+      final fw = Fairway.fromWay(way);
+      if (fw != null) assignToHole(fw, (h) => h.fairways.add(fw));
+    }
+
+    // Add greens to their respective holes
+    for (final way in overpass.ways.where((w) => w.tags['golf'] == 'green')) {
+      final gr = Green.fromWay(way);
+      if (gr != null) assignToHole(gr, (h) => h.greens.add(gr));
+    }
+
+    // Add tee platforms to their respective holes
+    for (final way in overpass.ways.where((w) => w.tags['golf'] == 'tee')) {
+      final tp = TeePlatform.fromWay(way);
+      if (tp != null) assignToHole(tp, (h) => h.teePlatforms.add(tp));
     }
 
     // Extract tee information (basic implementation)

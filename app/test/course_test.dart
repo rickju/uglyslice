@@ -165,6 +165,70 @@ void main() {
       expect(course.name, equals('Test Golf Club'));
     });
 
+    test('assigns putting_green to correct hole via spatial containment', () {
+      // Pin is at (-41.2870, 174.7780) — a corner of the hole polygon,
+      // so the geometry-based pin lookup finds it. Green centroid sits
+      // well inside the rectangle, triggering spatial containment assignment.
+      const jsonString = '''
+      {
+        "version": 0.6,
+        "generator": "Overpass API",
+        "elements": [
+          {
+            "type": "node", "id": 1001,
+            "lat": -41.2870, "lon": 174.7780,
+            "tags": {"golf": "pin"}
+          },
+          {
+            "type": "way", "id": 2001,
+            "geometry": [
+              {"lat": -41.2860, "lon": 174.7760},
+              {"lat": -41.2870, "lon": 174.7760},
+              {"lat": -41.2870, "lon": 174.7780},
+              {"lat": -41.2860, "lon": 174.7780},
+              {"lat": -41.2860, "lon": 174.7760}
+            ],
+            "tags": {"golf": "hole", "ref": "1", "par": "4"}
+          },
+          {
+            "type": "way", "id": 2002,
+            "geometry": [
+              {"lat": -41.2863, "lon": 174.7767},
+              {"lat": -41.2865, "lon": 174.7767},
+              {"lat": -41.2865, "lon": 174.7770},
+              {"lat": -41.2863, "lon": 174.7770},
+              {"lat": -41.2863, "lon": 174.7767}
+            ],
+            "tags": {"golf": "green"}
+          },
+          {
+            "type": "way", "id": 3001,
+            "geometry": [
+              {"lat": -41.2840, "lon": 174.7750},
+              {"lat": -41.2880, "lon": 174.7750},
+              {"lat": -41.2880, "lon": 174.7800},
+              {"lat": -41.2840, "lon": 174.7800},
+              {"lat": -41.2840, "lon": 174.7750}
+            ],
+            "tags": {"leisure": "golf_course", "name": "Test Golf Club"}
+          }
+        ]
+      }
+      ''';
+
+      final course = Course.fromJson(jsonString);
+
+      for (final h in course.holes) {
+        print('Hole ${h.holeNumber}: ${h.greens.length} green(s)');
+      }
+
+      expect(course.holes, hasLength(1));
+      final hole = course.holes[0];
+      expect(hole.holeNumber, equals(1));
+      expect(hole.greens, hasLength(1));
+      expect(hole.greens[0].id, equals(2002));
+    });
+
     test('should parse Karori Golf Course real data', () async {
       final file = File('karori.json');
       if (!await file.exists()) {
@@ -200,25 +264,51 @@ void main() {
 
       // Print for diagnostics
       for (final h in course.holes) {
-        print('Hole ${h.holeNumber}: ${h.fairways.length} fairway(s)');
+        print('Hole ${h.holeNumber}: ${h.fairways.length} fairway(s), ${h.greens.length} green(s), ${h.teePlatforms.length} tee platform(s)');
       }
 
-      // Holes with a fairway assigned via spatial containment
-      for (final n in [1, 3, 5, 7, 8, 9, 10, 12, 14, 16, 18]) {
-        expect(
-          byNum[n]!.fairways,
-          hasLength(1),
-          reason: 'Hole $n should have 1 fairway',
-        );
+      // Par-3 holes with no fairway way in OSM
+      for (final n in [2, 4, 6]) {
+        expect(byNum[n]!.fairways, isEmpty, reason: 'Hole $n (par-3) has no fairway in OSM');
       }
 
-      // Par-3 and other holes whose fairway centroid falls outside the hole polygon
-      for (final n in [2, 4, 6, 11, 13, 15, 17]) {
-        expect(
-          byNum[n]!.fairways,
-          isEmpty,
-          reason: 'Hole $n should have no fairways',
-        );
+      // All other holes get at least 1 fairway (bounding box or nearest fallback)
+      for (final h in course.holes.where((h) => ![2, 4, 6].contains(h.holeNumber))) {
+        expect(h.fairways, isNotEmpty, reason: 'Hole ${h.holeNumber} should have at least 1 fairway');
+      }
+
+      // Holes with 2 fairways (bounding boxes overlap adjacent hole)
+      for (final n in [5, 18]) {
+        expect(byNum[n]!.fairways, hasLength(2), reason: 'Hole $n should have 2 fairways');
+      }
+    }, timeout: const Timeout(Duration(seconds: 10)));
+
+    test('Karori holes have correct greens assigned', () async {
+      final file = File('karori.json');
+      if (!await file.exists()) {
+        markTestSkipped('karori.json file not found');
+        return;
+      }
+
+      final jsonString = await file.readAsString();
+      final course = Course.fromJson(jsonString);
+
+      expect(course.holes, hasLength(18));
+
+      final byNum = {for (final h in course.holes) h.holeNumber: h};
+
+      for (final h in course.holes) {
+        print('Hole ${h.holeNumber}: ${h.greens.length} green(s)');
+      }
+
+      // Holes with no green way in OSM near enough to assign
+      for (final n in [7, 16]) {
+        expect(byNum[n]!.greens, isEmpty, reason: 'Hole $n has no green in OSM');
+      }
+
+      // All other holes get at least 1 green
+      for (final h in course.holes.where((h) => ![7, 16].contains(h.holeNumber))) {
+        expect(h.greens, isNotEmpty, reason: 'Hole ${h.holeNumber} should have at least 1 green');
       }
     }, timeout: const Timeout(Duration(seconds: 10)));
   });
