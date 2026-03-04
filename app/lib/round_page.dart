@@ -31,7 +31,7 @@ class _RoundPageState extends State<RoundPage> {
   LatLng? _currentPlayerPos;
   LatLng? _selectedTee;
   LatLng? _rulerTarget;
-  bool _isSatellite = false;
+  bool _isSatellite = true;
 
   String? _errorMessage;
   final MapController _mapController = MapController();
@@ -189,8 +189,8 @@ out geom;
         final firstHole = _round!.course.holes[0];
         LatLng fallbackPosition;
 
-        if (firstHole.tees.isNotEmpty) {
-          fallbackPosition = firstHole.tees[0].position;
+        if (firstHole.teeBoxes.isNotEmpty) {
+          fallbackPosition = firstHole.teeBoxes[0].position;
         } else {
           fallbackPosition = firstHole.pin;
         }
@@ -288,9 +288,8 @@ out geom;
                 userAgentPackageName: 'com.example.golfapp',
               ),
               PolygonLayer(
-                // --- course border ---
                 polygons: [
-                  for (final hole in _round!.course.holes)
+                  for (final hole in _round!.course.holes) ...[
                     for (final fw in hole.fairways)
                       Polygon(
                         points: fw.points,
@@ -298,6 +297,21 @@ out geom;
                         borderColor: Colors.white,
                         borderStrokeWidth: 1,
                       ),
+                    for (final g in hole.greens)
+                      Polygon(
+                        points: g.points,
+                        color: _getColorForFeature(g.tags['golf']),
+                        borderColor: Colors.white,
+                        borderStrokeWidth: 1,
+                      ),
+                    for (final tp in hole.teePlatforms)
+                      Polygon(
+                        points: tp.points,
+                        color: _getColorForFeature(tp.tags['golf']),
+                        borderColor: Colors.white,
+                        borderStrokeWidth: 1,
+                      ),
+                  ],
                 ],
               ),
               if (_currentPlayerPos != null) // --- curr pos ---
@@ -319,7 +333,7 @@ out geom;
                 MarkerLayer(
                   markers: [
                     for (var tee
-                        in _round!.course.holes[_currentHoleIndex].tees)
+                        in _round!.course.holes[_currentHoleIndex].teeBoxes)
                       Marker(
                         point: tee.position,
                         width: 40,
@@ -533,90 +547,63 @@ out geom;
   }
 
   void _fitMapToHoleView(int holeIndex) {
-    debugPrint('round_page::_fitMapToHoleView: selected tee: $_selectedTee');
-    if (_round == null || _round!.course.holes.isEmpty) {
-      return;
+    if (_round == null || _round!.course.holes.isEmpty) return;
+
+    final hole = _round!.course.holes[holeIndex];
+    final pin = hole.pin;
+
+    // Tee positions: teeBox nodes first, then teePlatform centroids
+    LatLng? centroid(List<LatLng> pts) {
+      if (pts.isEmpty) return null;
+      return LatLng(
+        pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length,
+        pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length,
+      );
     }
 
-    // hole boundary
-    final hole = _round!.course.holes[holeIndex];
-    debugPrint('round_page::_fitMapToHoleView: hole #: ${hole.holeNumber}');
-    debugPrint('pin: ${hole.pin}');
-    debugPrint('tee num: ${hole.tees.length}');
+    final List<LatLng> teePositions = [
+      ...hole.teeBoxes.map((t) => t.position),
+      ...hole.teePlatforms
+          .map((tp) => centroid(tp.points))
+          .whereType<LatLng>(),
+    ];
 
-    // ------------------------------
-    final pin = hole.pin;
-    if (hole.tees.isEmpty) {
+    // Fix 2: bearing — use first fairway segment for dogleg holes,
+    // fall back to tee→pin straight line
+    double bearing;
+    if (hole.fairways.isNotEmpty && hole.fairways.first.points.length >= 2) {
+      final fw = hole.fairways.first.points;
+      bearing = const Distance().bearing(fw.first, fw.last);
+    } else if (teePositions.isNotEmpty) {
+      final teeCenter = centroid(teePositions)!;
+      bearing = const Distance().bearing(teeCenter, pin);
+    } else {
+      bearing = 0; // no data → keep north up
+    }
+
+    // Fix 1: rotate BEFORE fitCamera so flutter_map accounts for the rotation
+    // when computing zoom — prevents clipped corners
+    _mapController.rotate(-bearing);
+
+    if (teePositions.isEmpty) {
+      // Fix 3: no tee data but we still applied rotation above
       _mapController.move(pin, 16);
       return;
     }
-    final LatLng teePosition = hole.tees[0].position;
-    // 1. 基础点集：包含旗杆和发球台
-    final List<LatLng> points = [
-      hole.pin,
-      ...hole.tees.map((TeeBox t) => t.position),
-    ];
-    debugPrint(
-      'points: \n${points.map((p) => "(${p.latitude}, ${p.longitude})").join("\n")}',
+
+    final List<LatLng> points = [pin, ...teePositions];
+    final double meters = const Distance().as(
+      LengthUnit.Meter, pin, teePositions.first,
     );
+    final double padding = meters < 150 ? 100.0 : 60.0;
 
-    // 2. 计算距离以确定动态 Padding (方案 3)
-    const Distance distanceCalculator = Distance();
-    final double meters = distanceCalculator.as(
-      LengthUnit.Meter,
-      pin,
-      teePosition,
-    );
-
-    // 根据球洞长度决定边距
-    double dynamicPadding = meters < 150 ? 100.0 : 60.0;
-
-    // 3. 使用 v8.x 推荐的 fitCamera 方法
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: LatLngBounds.fromPoints(points),
-        padding: EdgeInsets.all(dynamicPadding),
-        // 方案 2：限制最大缩放，防止只有一个 Tee 时缩放过深
-        maxZoom: 18.0,
-        // 方案 3：如果需要，可以设置 minZoom 防止缩放得太小看不了全景
-        minZoom: 3.0,
+        padding: EdgeInsets.all(padding),
+        maxZoom: 17.0,
+        minZoom: 14.0,
       ),
     );
-
-    debugPrint('fitCamera: Distance ${meters.toStringAsFixed(1)}m');
-    // ------------------------------
-
-    if (points.isEmpty) {
-      _mapController.move(hole.pin, 16);
-      return;
-    }
-
-    final bounds = LatLngBounds.fromPoints(points);
-    debugPrint(bounds.toString());
-    LatLng centerOfTees;
-    if (hole.tees.isNotEmpty) {
-      double totalLat = 0;
-      double totalLng = 0;
-      for (var tee in hole.tees) {
-        totalLat += tee.position.latitude;
-        totalLng += tee.position.longitude;
-      }
-      centerOfTees = LatLng(
-        totalLat / hole.tees.length,
-        totalLng / hole.tees.length,
-      );
-    } else {
-      _mapController.fitCamera(
-        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
-      );
-      return;
-    }
-
-    final bearing = const Distance().bearing(centerOfTees, hole.pin);
-
-    _mapController.fitCamera(
-      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
-    );
-    _mapController.rotate(-bearing);
   }
 }
