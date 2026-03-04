@@ -186,22 +186,20 @@ void main() {
             '${h.teePlatforms.length} tee platform(s)');
       }
 
-      // Fairways — par-3 holes 2/4/6 have no fairway way in OSM
+      // Par-3 holes 2/4/6 have no fairway way in OSM
       for (final n in [2, 4, 6]) {
         expect(byNum[n]!.fairways, isEmpty, reason: 'Hole $n (par-3) has no fairway in OSM');
       }
-      for (final h in course.holes.where((h) => ![2, 4, 6].contains(h.holeNumber))) {
-        expect(h.fairways, isNotEmpty, reason: 'Hole ${h.holeNumber} should have at least 1 fairway');
-      }
-      for (final n in [5, 18]) {
+      // All other holes get exactly 1 fairway except 7 and 18 which get 2
+      for (final n in [7, 18]) {
         expect(byNum[n]!.fairways, hasLength(2), reason: 'Hole $n should have 2 fairways');
       }
-
-      // Greens — holes 7/16 have no green way in OSM
-      for (final n in [7, 16]) {
-        expect(byNum[n]!.greens, isEmpty, reason: 'Hole $n has no green in OSM');
+      for (final h in course.holes.where((h) => ![2, 4, 6, 7, 18].contains(h.holeNumber))) {
+        expect(h.fairways, hasLength(1), reason: 'Hole ${h.holeNumber} should have 1 fairway');
       }
-      for (final h in course.holes.where((h) => ![7, 16].contains(h.holeNumber))) {
+
+      // Every hole gets at least 1 green
+      for (final h in course.holes) {
         expect(h.greens, isNotEmpty, reason: 'Hole ${h.holeNumber} should have at least 1 green');
       }
     }, timeout: const Timeout(Duration(seconds: 10)));

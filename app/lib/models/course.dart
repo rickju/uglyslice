@@ -448,27 +448,37 @@ class Course {
       final centroid = feature.polygon!.getCentroid();
       final centroidLatLng = LatLng(centroid.getY(), centroid.getX());
 
-      // Padded bounding box containment
-      for (final hole in holes) {
-        final holePoly = holePolygons[hole.holeNumber];
-        if (holePoly != null &&
-            JtsHelper.pointInPolygon(centroidLatLng, holePoly)) {
-          add(hole);
-          return;
-        }
+      double pinDist(Hole hole) {
+        final dLat = centroidLatLng.latitude - hole.pin.latitude;
+        final dLon = centroidLatLng.longitude - hole.pin.longitude;
+        return dLat * dLat + dLon * dLon;
       }
 
-      // Fallback: nearest hole by centroid distance
+      // Among all holes whose padded bbox contains the feature, pick the one
+      // whose pin is nearest — the green/tee is always at the pin end.
       Hole? nearest;
       double minDist = double.infinity;
       for (final hole in holes) {
-        final hc = holeCentroids[hole.holeNumber];
-        if (hc == null) continue;
-        final dLat = centroidLatLng.latitude - hc.latitude;
-        final dLon = centroidLatLng.longitude - hc.longitude;
-        final dist = dLat * dLat + dLon * dLon;
-        if (dist < minDist) {
-          minDist = dist;
+        final holePoly = holePolygons[hole.holeNumber];
+        if (holePoly == null) continue;
+        if (!JtsHelper.pointInPolygon(centroidLatLng, holePoly)) continue;
+        final d = pinDist(hole);
+        if (d < minDist) {
+          minDist = d;
+          nearest = hole;
+        }
+      }
+      if (nearest != null) {
+        add(nearest);
+        return;
+      }
+
+      // Fallback: no bbox match — assign to nearest hole by pin distance
+      minDist = double.infinity;
+      for (final hole in holes) {
+        final d = pinDist(hole);
+        if (d < minDist) {
+          minDist = d;
           nearest = hole;
         }
       }
