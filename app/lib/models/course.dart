@@ -240,7 +240,6 @@ class Hole {
   final LatLng pin;
 
   final List<LatLng> routingLine;
-  final LatLng boundMin, boundMax;
   final List<TeeBox> teeBoxes;
   final List<TeePlatform> teePlatforms;
   final List<Fairway> fairways;
@@ -252,13 +251,38 @@ class Hole {
     required this.par,
     this.handicapIndex = 0,
     required this.pin,
+    this.routingLine = const [],
     this.teeBoxes = const [],
     this.teePlatforms = const [],
     this.fairways = const [],
     this.greens = const [],
-    required this.boundMin,
-    required this.boundMax,
   });
+
+  // All geometry points across every feature assigned to this hole.
+  // Recomputed on access so it grows as fairways/greens/teePlatforms are added.
+  List<LatLng> get _allPoints => [
+        ...routingLine,
+        ...teePlatforms.expand((tp) => tp.points),
+        ...fairways.expand((fw) => fw.points),
+        ...greens.expand((g) => g.points),
+        pin,
+      ];
+
+  LatLng get boundMin {
+    final pts = _allPoints;
+    return LatLng(
+      pts.map((p) => p.latitude).reduce((a, b) => a < b ? a : b),
+      pts.map((p) => p.longitude).reduce((a, b) => a < b ? a : b),
+    );
+  }
+
+  LatLng get boundMax {
+    final pts = _allPoints;
+    return LatLng(
+      pts.map((p) => p.latitude).reduce((a, b) => a > b ? a : b),
+      pts.map((p) => p.longitude).reduce((a, b) => a > b ? a : b),
+    );
+  }
 
   // Ordered waypoints from tee to pin representing the intended playing line.
   // Tee centroid → fairway centroids (sorted by distance from tee) → pin.
@@ -313,33 +337,6 @@ class Hole {
     final par = int.parse(way.tags['par'] ?? '0');
     final handicapIndex = int.parse(way.tags['handicap'] ?? '0');
 
-    // bounds - use way bounds if available, otherwise create from points
-    LatLng boundMin, boundMax;
-    if (way.bounds != null) {
-      boundMin = way.bounds!.southWest;
-      boundMax = way.bounds!.northEast;
-    } else if (way.points.isNotEmpty) {
-      // Calculate bounds from points
-      double minLat = way.points[0].latitude;
-      double minLon = way.points[0].longitude;
-      double maxLat = way.points[0].latitude;
-      double maxLon = way.points[0].longitude;
-
-      for (final point in way.points) {
-        if (point.latitude < minLat) minLat = point.latitude;
-        if (point.longitude < minLon) minLon = point.longitude;
-        if (point.latitude > maxLat) maxLat = point.latitude;
-        if (point.longitude > maxLon) maxLon = point.longitude;
-      }
-
-      boundMin = LatLng(minLat, minLon);
-      boundMax = LatLng(maxLat, maxLon);
-    } else {
-      // No bounds available
-      boundMin = LatLng(0.0, 0.0);
-      boundMax = LatLng(0.0, 0.0);
-    }
-
     LatLng? pin;
     List<TeeBox> teeBoxes = [];
 
@@ -380,12 +377,11 @@ class Hole {
       par: par,
       handicapIndex: handicapIndex,
       pin: pin!,
+      routingLine: way.points,
       teeBoxes: teeBoxes,
       teePlatforms: [],
       fairways: [],
       greens: [],
-      boundMin: boundMin,
-      boundMax: boundMax,
     );
   }
 

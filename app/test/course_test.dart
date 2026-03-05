@@ -186,8 +186,6 @@ void main() {
             pin: pin,
             teeBoxes: [TeeBox(position: tee)],
             fairways: fairways,
-            boundMin: LatLng(-41.295, 174.765),
-            boundMax: LatLng(-41.275, 174.795),
           );
 
       test('straight hole — 2 waypoints, ends at pin', () {
