@@ -305,15 +305,27 @@ out geom;
                         borderStrokeWidth: 1,
                       ),
                     for (final tp in hole.teePlatforms)
-                      Polygon(
-                        points: tp.points,
-                        color: _getColorForFeature(tp.tags['golf']),
-                        borderColor: Colors.white,
-                        borderStrokeWidth: 1,
-                      ),
+                      if (tp.boundingRect.isNotEmpty)
+                        Polygon(
+                          points: tp.boundingRect,
+                          color: _getColorForFeature(tp.tags['golf']),
+                          borderColor: Colors.white,
+                          borderStrokeWidth: 0.5,
+                        ),
                   ],
                 ],
               ),
+              if (_round!.course.holes.isNotEmpty) // --- play line ---
+                PolylineLayer(
+                  polylines: [
+                    Polyline(
+                      points: _round!.course.holes[_currentHoleIndex].playLine(),
+                      color: Colors.white.withValues(alpha: 0.7),
+                      strokeWidth: 2,
+                      pattern: StrokePattern.dashed(segments: const [12, 6]),
+                    ),
+                  ],
+                ),
               if (_currentPlayerPos != null) // --- curr pos ---
                 MarkerLayer(
                   markers: [

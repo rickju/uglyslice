@@ -50,6 +50,26 @@ class TeePlatform {
 
   String? get color => tags['color'] as String?;
 
+  // Axis-aligned bounding rect as a closed polygon ring (5 points).
+  // Use this for rendering instead of the raw polygon — easier to read on map.
+  List<LatLng> get boundingRect {
+    final src = bounds != null
+        ? [bounds!.southWest, bounds!.northEast]
+        : points;
+    if (src.isEmpty) return [];
+    final minLat = src.map((p) => p.latitude).reduce((a, b) => a < b ? a : b);
+    final maxLat = src.map((p) => p.latitude).reduce((a, b) => a > b ? a : b);
+    final minLon = src.map((p) => p.longitude).reduce((a, b) => a < b ? a : b);
+    final maxLon = src.map((p) => p.longitude).reduce((a, b) => a > b ? a : b);
+    return [
+      LatLng(minLat, minLon),
+      LatLng(maxLat, minLon),
+      LatLng(maxLat, maxLon),
+      LatLng(minLat, maxLon),
+      LatLng(minLat, minLon),
+    ];
+  }
+
   static TeePlatform? fromWay(Way way) {
     if (way.tags['golf'] != 'tee' || way.points.length < 3) return null;
     return TeePlatform(
@@ -219,6 +239,7 @@ class Hole {
   final int handicapIndex;
   final LatLng pin;
 
+  final List<LatLng> routingLine;
   final LatLng boundMin, boundMax;
   final List<TeeBox> teeBoxes;
   final List<TeePlatform> teePlatforms;
@@ -264,13 +285,16 @@ class Hole {
     if (fairways.isNotEmpty) {
       final ref = teePoint ?? pin;
       final dist = const Distance();
-      final centroids = fairways
-          .map((fw) => _centroid(fw.points))
-          .whereType<LatLng>()
-          .toList()
-        ..sort((a, b) =>
-            dist.as(LengthUnit.Meter, ref, a)
-                .compareTo(dist.as(LengthUnit.Meter, ref, b)));
+      final centroids =
+          fairways
+              .map((fw) => _centroid(fw.points))
+              .whereType<LatLng>()
+              .toList()
+            ..sort(
+              (a, b) => dist
+                  .as(LengthUnit.Meter, ref, a)
+                  .compareTo(dist.as(LengthUnit.Meter, ref, b)),
+            );
       line.addAll(centroids);
     }
 
