@@ -329,33 +329,53 @@ out geom;
                     ),
                   ],
                 ),
-              if (_round!.course.holes.isNotEmpty) // --- tee ----
+              if (_round!.course.holes.isNotEmpty) ...[
+                // --- pin ---
                 MarkerLayer(
                   markers: [
-                    for (var tee
-                        in _round!.course.holes[_currentHoleIndex].teeBoxes)
-                      Marker(
-                        point: tee.position,
-                        width: 40,
-                        height: 40,
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedTee = tee.position;
-                            });
-                            _fitMapToHole();
-                          },
-                          child: Icon(
-                            Icons.location_on,
-                            color: _selectedTee == tee.position
-                                ? Colors.purple
-                                : Colors.red,
-                            size: 30,
-                          ),
-                        ),
-                      ),
+                    Marker(
+                      point: _round!.course.holes[_currentHoleIndex].pin,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.flag, color: Colors.red, size: 30),
+                    ),
                   ],
                 ),
+                // --- tee: teeBox nodes first, teePlatform centroids as fallback ---
+                Builder(builder: (context) {
+                  final hole = _round!.course.holes[_currentHoleIndex];
+                  final List<LatLng> teePositions = [
+                    ...hole.teeBoxes.map((t) => t.position),
+                    if (hole.teeBoxes.isEmpty)
+                      for (final tp in hole.teePlatforms.where((tp) => tp.points.isNotEmpty))
+                        LatLng(
+                          tp.points.map((p) => p.latitude).reduce((a, b) => a + b) / tp.points.length,
+                          tp.points.map((p) => p.longitude).reduce((a, b) => a + b) / tp.points.length,
+                        ),
+                  ];
+                  return MarkerLayer(
+                    markers: [
+                      for (final pos in teePositions)
+                        Marker(
+                          point: pos,
+                          width: 40,
+                          height: 40,
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() => _selectedTee = pos);
+                              _fitMapToHole();
+                            },
+                            child: Icon(
+                              Icons.location_on,
+                              color: _selectedTee == pos ? Colors.purple : Colors.orange,
+                              size: 30,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                }),
+              ],
               if (_rulerTarget != null) // --- ruler ---
                 MarkerLayer(
                   markers: [
@@ -517,7 +537,7 @@ out geom;
       case 'green':
         return Colors.green.withOpacity(0.5);
       case 'tee':
-        return Colors.blue.withOpacity(0.5);
+        return Colors.green.withOpacity(0.7);
       case 'fairway':
         return Colors.lightGreen.withOpacity(0.5);
       case 'bunker':
@@ -568,18 +588,11 @@ out geom;
           .whereType<LatLng>(),
     ];
 
-    // Fix 2: bearing — use first fairway segment for dogleg holes,
-    // fall back to tee→pin straight line
-    double bearing;
-    if (hole.fairways.isNotEmpty && hole.fairways.first.points.length >= 2) {
-      final fw = hole.fairways.first.points;
-      bearing = const Distance().bearing(fw.first, fw.last);
-    } else if (teePositions.isNotEmpty) {
-      final teeCenter = centroid(teePositions)!;
-      bearing = const Distance().bearing(teeCenter, pin);
-    } else {
-      bearing = 0; // no data → keep north up
-    }
+    // Bearing from play line: tee → first fairway centroid (handles doglegs)
+    final playLine = hole.playLine();
+    final double bearing = playLine.length >= 2
+        ? const Distance().bearing(playLine.first, playLine[1])
+        : 0.0;
 
     // Fix 1: rotate BEFORE fitCamera so flutter_map accounts for the rotation
     // when computing zoom — prevents clipped corners

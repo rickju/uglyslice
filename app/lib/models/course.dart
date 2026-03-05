@@ -239,6 +239,45 @@ class Hole {
     required this.boundMax,
   });
 
+  // Ordered waypoints from tee to pin representing the intended playing line.
+  // Tee centroid → fairway centroids (sorted by distance from tee) → pin.
+  // Used for map rotation and future play-line overlay rendering.
+  List<LatLng> playLine() {
+    LatLng? _centroid(List<LatLng> pts) {
+      if (pts.isEmpty) return null;
+      return LatLng(
+        pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length,
+        pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length,
+      );
+    }
+
+    final List<LatLng> line = [];
+
+    // Tee end: prefer teeBox nodes, fall back to all teePlatform vertices
+    final teePoint = _centroid([
+      ...teeBoxes.map((t) => t.position),
+      ...teePlatforms.expand((tp) => tp.points),
+    ]);
+    if (teePoint != null) line.add(teePoint);
+
+    // Fairway centroids sorted by distance from tee (or pin when no tee)
+    if (fairways.isNotEmpty) {
+      final ref = teePoint ?? pin;
+      final dist = const Distance();
+      final centroids = fairways
+          .map((fw) => _centroid(fw.points))
+          .whereType<LatLng>()
+          .toList()
+        ..sort((a, b) =>
+            dist.as(LengthUnit.Meter, ref, a)
+                .compareTo(dist.as(LengthUnit.Meter, ref, b)));
+      line.addAll(centroids);
+    }
+
+    line.add(pin);
+    return line;
+  }
+
   // arg Way: the specific Way object we want to parse as hole
   // arg overpass: whole overpass object from json
   static Hole? fromWay(Way way, Overpass overpass) {
