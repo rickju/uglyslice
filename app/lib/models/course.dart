@@ -21,6 +21,22 @@ class TeeInfo {
     this.slopeRating = 0.0,
   });
 
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'color': color,
+        'yardage': yardage,
+        'courseRating': courseRating,
+        'slopeRating': slopeRating,
+      };
+
+  factory TeeInfo.fromMap(Map<String, dynamic> m) => TeeInfo(
+        name: m['name'] as String,
+        color: m['color'] as String,
+        yardage: (m['yardage'] as num).toDouble(),
+        courseRating: (m['courseRating'] as num).toDouble(),
+        slopeRating: (m['slopeRating'] as num).toDouble(),
+      );
+
   @override
   String toString() {
     return 'TeeInfo: $color, $yardage, course rating: $courseRating, slope rating: $slopeRating\n';
@@ -31,6 +47,14 @@ class TeeInfo {
 class TeeBox {
   final LatLng position;
   TeeBox({required this.position});
+
+  Map<String, dynamic> toMap() => {
+        'lat': position.latitude,
+        'lng': position.longitude,
+      };
+
+  factory TeeBox.fromMap(Map<String, dynamic> m) =>
+      TeeBox(position: LatLng(m['lat'] as double, m['lng'] as double));
 }
 
 class TeePlatform {
@@ -81,6 +105,28 @@ class TeePlatform {
     );
   }
 
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'tags': tags,
+        'points': points.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+      };
+
+  factory TeePlatform.fromMap(Map<String, dynamic> m) {
+    final pts = (m['points'] as List)
+        .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+        .toList();
+    jts.Polygon? poly;
+    if (pts.length >= 3) {
+      try { poly = JtsHelper.fromLatLngPoints(pts); } catch (_) {}
+    }
+    return TeePlatform(
+      id: m['id'] as int,
+      tags: Map<String, dynamic>.from(m['tags'] as Map),
+      points: pts,
+      polygon: poly,
+    );
+  }
+
   @override
   String toString() => 'TeePlatform(id: $id, color: $color)';
 }
@@ -120,6 +166,28 @@ class Fairway {
   bool containsPoint(LatLng point) {
     if (polygon == null) return false;
     return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'tags': tags,
+        'points': points.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+      };
+
+  factory Fairway.fromMap(Map<String, dynamic> m) {
+    final pts = (m['points'] as List)
+        .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+        .toList();
+    jts.Polygon? poly;
+    if (pts.length >= 3) {
+      try { poly = JtsHelper.fromLatLngPoints(pts); } catch (_) {}
+    }
+    return Fairway(
+      id: m['id'] as int,
+      tags: Map<String, dynamic>.from(m['tags'] as Map),
+      points: pts,
+      polygon: poly,
+    );
   }
 
   @override
@@ -225,6 +293,28 @@ class Green {
   bool containsPoint(LatLng point) {
     if (polygon == null) return false;
     return JtsHelper.pointInPolygon(point, polygon!);
+  }
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'tags': tags,
+        'points': points.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+      };
+
+  factory Green.fromMap(Map<String, dynamic> m) {
+    final pts = (m['points'] as List)
+        .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+        .toList();
+    jts.Polygon? poly;
+    if (pts.length >= 3) {
+      try { poly = JtsHelper.fromLatLngPoints(pts); } catch (_) {}
+    }
+    return Green(
+      id: m['id'] as int,
+      tags: Map<String, dynamic>.from(m['tags'] as Map),
+      points: pts,
+      polygon: poly,
+    );
   }
 
   @override
@@ -386,6 +476,45 @@ class Hole {
   }
 
   @override
+  Map<String, dynamic> toMap() => {
+        'holeNumber': holeNumber,
+        'par': par,
+        'handicapIndex': handicapIndex,
+        'pin': {'lat': pin.latitude, 'lng': pin.longitude},
+        'routingLine': routingLine
+            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+            .toList(),
+        'teeBoxes': teeBoxes.map((t) => t.toMap()).toList(),
+        'teePlatforms': teePlatforms.map((tp) => tp.toMap()).toList(),
+        'fairways': fairways.map((fw) => fw.toMap()).toList(),
+        'greens': greens.map((g) => g.toMap()).toList(),
+      };
+
+  factory Hole.fromMap(Map<String, dynamic> m) => Hole(
+        holeNumber: m['holeNumber'] as int,
+        par: m['par'] as int,
+        handicapIndex: m['handicapIndex'] as int? ?? 0,
+        pin: LatLng(
+          (m['pin'] as Map)['lat'] as double,
+          (m['pin'] as Map)['lng'] as double,
+        ),
+        routingLine: (m['routingLine'] as List? ?? [])
+            .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+            .toList(),
+        teeBoxes: (m['teeBoxes'] as List? ?? [])
+            .map((t) => TeeBox.fromMap(t as Map<String, dynamic>))
+            .toList(),
+        teePlatforms: (m['teePlatforms'] as List? ?? [])
+            .map((t) => TeePlatform.fromMap(t as Map<String, dynamic>))
+            .toList(),
+        fairways: (m['fairways'] as List? ?? [])
+            .map((t) => Fairway.fromMap(t as Map<String, dynamic>))
+            .toList(),
+        greens: (m['greens'] as List? ?? [])
+            .map((t) => Green.fromMap(t as Map<String, dynamic>))
+            .toList(),
+      );
+
   String toString() {
     return 'Hole: $holeNumber, par: $par, hcp: $handicapIndex, pin: $pin';
   }
@@ -412,6 +541,65 @@ class Course {
     this.holes = const [],
     this.cartPaths = const [],
   });
+
+  // Minimal course for scorecard display — no geometry, no Overpass data.
+  factory Course.stub({required String id, required String name}) => Course(
+        id: id,
+        name: name,
+        overpass: Overpass(),
+        boundary: JtsHelper.fromLatLngPoints([
+          LatLng(0, 0), LatLng(0, 1), LatLng(1, 0), LatLng(0, 0),
+        ]),
+      );
+
+  // Reconstruct a Course from Firestore maps (no Overpass object).
+  // [courseData] is the root document map.
+  // [holeMaps] is the ordered list of hole sub-document maps.
+  factory Course.fromFirestore(
+    Map<String, dynamic> courseData,
+    List<Map<String, dynamic>> holeMaps,
+  ) {
+    final boundaryPts = (courseData['boundaryPoints'] as List? ?? [])
+        .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+        .toList();
+    final boundary = boundaryPts.length >= 3
+        ? JtsHelper.fromLatLngPoints(boundaryPts)
+        : JtsHelper.fromLatLngPoints([
+            LatLng(0, 0), LatLng(0, 1), LatLng(1, 0), LatLng(0, 0),
+          ]);
+    final cartPaths = (courseData['cartPaths'] as List? ?? [])
+        .map((path) => (path as List)
+            .map((p) => LatLng(p['lat'] as double, p['lng'] as double))
+            .toList())
+        .toList();
+    return Course(
+      id: courseData['id'] as String,
+      name: courseData['name'] as String,
+      overpass: Overpass(),
+      boundary: boundary,
+      teeInfos: (courseData['teeInfos'] as List? ?? [])
+          .map((t) => TeeInfo.fromMap(t as Map<String, dynamic>))
+          .toList(),
+      holes: holeMaps.map(Hole.fromMap).toList(),
+      cartPaths: cartPaths,
+    );
+  }
+
+  // Firestore root document map (excludes holes sub-collection and Overpass blob).
+  Map<String, dynamic> toFirestoreMap(List<LatLng> boundaryPoints) => {
+        'id': id,
+        'name': name,
+        'holeCount': holes.length,
+        'boundaryPoints': boundaryPoints
+            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+            .toList(),
+        'teeInfos': teeInfos.map((t) => t.toMap()).toList(),
+        'cartPaths': cartPaths
+            .map((path) =>
+                path.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList())
+            .toList(),
+        'updatedAt': DateTime.now(),
+      };
 
   static Course fromJson(String json) {
     final overpass = Overpass.fromJson(json);

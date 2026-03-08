@@ -11,6 +11,7 @@ import 'models/course.dart';
 import 'models/player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'services/course_repository.dart';
 
 // page widget
 class RoundPage extends StatefulWidget {
@@ -118,37 +119,64 @@ out geom;
     final directory = await getApplicationDocumentsDirectory();
     final fileName = '${widget.courseName.replaceAll(' ', '_')}.json';
     final file = File('${directory.path}/$fileName');
+    Course? golfCourse;
 
+    // 1. Local file cache (fastest)
     debugPrint('Looking for local cached course file at: ${file.path}');
     if (await file.exists()) {
       try {
-        final jsonString = await file.readAsString();
-        final golfCourse = Course.fromJson(jsonString);
-        final player = Player(name: 'Rick');
-        setState(() {
-          _round = Round(
-            player: player,
-            course: golfCourse,
-            date: DateTime.now(),
-          );
-          _isLoading = false;
-        });
-        debugPrint(
-          'Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}',
-        );
-        _determinePosition();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_round!.course.holes.isNotEmpty) {
-            _fitMapToHoleView(0);
-          }
-        });
-        return;
+        golfCourse = Course.fromJson(await file.readAsString());
+        debugPrint('Loaded from local file cache');
       } catch (e) {
-        debugPrint('failed to load local course json file, error: $e');
-        // Fallback to network if cache is invalid
-        // XXX await _apiQuery(file); XXX
+        debugPrint('Local cache parse failed: $e');
       }
     }
+
+    // 2. Firestore cache
+    if (golfCourse == null) {
+      try {
+        final repo = CourseRepository();
+        final courseId = 'course_${widget.courseName.replaceAll(' ', '_')}';
+        golfCourse = await repo.fetchCourse(courseId);
+        if (golfCourse != null) {
+          debugPrint('Loaded from Firestore cache');
+        }
+      } catch (e) {
+        debugPrint('Firestore fetch failed: $e');
+      }
+    }
+
+    // 3. Overpass API fallback (then save to Firestore)
+    if (golfCourse == null) {
+      try {
+        await _apiQuery(file);
+        if (await file.exists()) {
+          golfCourse = Course.fromJson(await file.readAsString());
+          // Save to Firestore so other users benefit
+          try {
+            await CourseRepository().saveCourse(golfCourse!);
+            debugPrint('Course saved to Firestore');
+          } catch (e) {
+            debugPrint('Firestore save failed (non-fatal): $e');
+          }
+        }
+      } catch (e) {
+        debugPrint('Overpass API failed: $e');
+      }
+    }
+
+    if (golfCourse == null) return;
+
+    final player = Player(name: 'Rick');
+    setState(() {
+      _round = Round(player: player, course: golfCourse!, date: DateTime.now());
+      _isLoading = false;
+    });
+    debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');
+    _determinePosition();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_round!.course.holes.isNotEmpty) _fitMapToHoleView(0);
+    });
   } // _loadCourse
 
   Future<void> _determinePosition() async {
