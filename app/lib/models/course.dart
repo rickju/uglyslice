@@ -400,9 +400,8 @@ class Course {
   final List<TeeInfo> teeInfos;
 
   final List<Hole> holes;
-  // bunker, hazard,
-  // addr/phone etc. in tags
-  // facility e.g. clubhouse/cartpath
+  final List<List<LatLng>> cartPaths;
+  // bunker, hazard, addr/phone etc. in tags
 
   Course({
     required this.id,
@@ -411,6 +410,7 @@ class Course {
     required this.boundary,
     this.teeInfos = const [],
     this.holes = const [],
+    this.cartPaths = const [],
   });
 
   static Course fromJson(String json) {
@@ -587,6 +587,11 @@ class Course {
       );
     }
 
+    final cartPaths = overpass.ways
+        .where((w) => w.tags['golf'] == 'cartpath' && w.points.length >= 2)
+        .map((w) => w.points)
+        .toList();
+
     return Course(
       id: courseId,
       name: courseName,
@@ -594,6 +599,7 @@ class Course {
       boundary: boundary,
       teeInfos: teeInfos,
       holes: holes,
+      cartPaths: cartPaths,
     );
   }
 }

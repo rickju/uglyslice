@@ -315,17 +315,25 @@ out geom;
                   ],
                 ],
               ),
-              if (_round!.course.holes.isNotEmpty) // --- play line ---
-                PolylineLayer(
-                  polylines: [
+              PolylineLayer(
+                polylines: [
+                  // --- cart paths ---
+                  for (final path in _round!.course.cartPaths)
+                    Polyline(
+                      points: path,
+                      color: Colors.brown.withValues(alpha: 0.7),
+                      strokeWidth: 2,
+                    ),
+                  // --- play line for current hole ---
+                  if (_round!.course.holes.isNotEmpty)
                     Polyline(
                       points: _round!.course.holes[_currentHoleIndex].playLine(),
                       color: Colors.white.withValues(alpha: 0.7),
                       strokeWidth: 2,
                       pattern: StrokePattern.dashed(segments: const [12, 6]),
                     ),
-                  ],
-                ),
+                ],
+              ),
               if (_currentPlayerPos != null) // --- curr pos ---
                 MarkerLayer(
                   markers: [
