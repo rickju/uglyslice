@@ -5,13 +5,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'models/course.dart';
-import 'models/player.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 import 'services/course_repository.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 // page widget
 class RoundPage extends StatefulWidget {
@@ -43,129 +39,52 @@ class _RoundPageState extends State<RoundPage> {
     _loadCourse();
   }
 
-  // XXX: hard code: Karori XXX
-  Future<void> _apiQuery(File file) async {
-    final query = """
-[out:json][timeout:25];
-// 1. 查找指定名称的球场主体（可以是 Way 或 Relation）
-(
-  // way["leisure"="golf_course"]["name"~"佘山国际高尔夫"];
-  // relation["leisure"="golf_course"]["name"~"佘山国际高尔夫"];
-  node["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
-  way["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
-  relation["leisure"="golf_course"]["name"="Karori Golf Club"](-47.5, 166.0, -34.0, 179.0);
-)->.course;
-// 2. 将球场主体放入输出
-.course out geom;
-// 3. 递归获取该球场区域内的所有高尔夫相关设施（果岭、沙坑等）
-(
-  node(area.course)["golf"];
-  way(area.course)["golf"];
-  relation(area.course)["golf"];
-);
-out geom;
-""";
+  Future<void> _loadCourse() async {
+    Course? golfCourse;
+    final repo = CourseRepository();
+    final courseId = 'course_${widget.courseName.replaceAll(' ', '_')}';
 
+    // 1. Firestore
     try {
-      debugPrint('api query: $query');
-      final response = await http.post(
-        Uri.parse('https://overpass-api.de/api/interpreter'),
-        body: query,
-      );
-
-      if (response.statusCode == 200) {
-        final golfCourse = Course.fromJson(response.body);
-
-        // if (golfCourse.holes.isNotEmpty) {
-        await file.writeAsString(response.body);
-        // }
-
-        final player = Player(name: 'Rick');
-        setState(() {
-          _round = Round(
-            player: player,
-            course: golfCourse,
-            date: DateTime.now(),
-          );
-          _isLoading = false;
-        });
-        debugPrint(
-          'Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}',
-        );
-        _determinePosition();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_round!.course.holes.isNotEmpty) {
-            _fitMapToHoleView(0);
-          }
-        });
-      } else {
-        throw Exception('Failed to query full course data');
+      golfCourse = await repo.fetchCourse(courseId);
+      if (golfCourse != null) {
+        debugPrint('Loaded from Firestore');
       }
     } catch (e) {
-      final directory = await getApplicationDocumentsDirectory();
-      final fileName = '${widget.courseName.replaceAll(' ', '_')}.json';
-      final expectedPath = '${directory.path}/$fileName';
-
-      setState(() {
-        _isLoading = false;
-        _errorMessage =
-            'api query failed for ${widget.courseName}.\n\n'
-            'To use a cached file, please place it at:\n$expectedPath';
-      });
-    }
-  } // _apiQuery
-
-  Future<void> _loadCourse() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final fileName = '${widget.courseName.replaceAll(' ', '_')}.json';
-    final file = File('${directory.path}/$fileName');
-    Course? golfCourse;
-
-    // 1. Local file cache (fastest)
-    debugPrint('Looking for local cached course file at: ${file.path}');
-    if (await file.exists()) {
-      try {
-        golfCourse = Course.fromJson(await file.readAsString());
-        debugPrint('Loaded from local file cache');
-      } catch (e) {
-        debugPrint('Local cache parse failed: $e');
-      }
+      debugPrint('Firestore fetch failed: $e');
     }
 
-    // 2. Firestore cache
+    // 2. Cloud Function — triggers backend ingest then re-fetch
     if (golfCourse == null) {
       try {
-        final repo = CourseRepository();
-        final courseId = 'course_${widget.courseName.replaceAll(' ', '_')}';
+        debugPrint('Calling ingestCourse Cloud Function for ${widget.courseName}');
+        final callable = FirebaseFunctions.instance.httpsCallable('ingestCourse');
+        await callable.call(<String, dynamic>{
+          'courseName': widget.courseName,
+        });
+        // Re-fetch from Firestore after ingest
         golfCourse = await repo.fetchCourse(courseId);
         if (golfCourse != null) {
-          debugPrint('Loaded from Firestore cache');
+          debugPrint('Loaded from Firestore after Cloud Function ingest');
         }
       } catch (e) {
-        debugPrint('Firestore fetch failed: $e');
+        debugPrint('Cloud Function ingest failed: $e');
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load course data for ${widget.courseName}.\n'
+              'Please check your connection and try again.';
+        });
+        return;
       }
     }
 
-    // 3. Overpass API fallback (then save to Firestore)
     if (golfCourse == null) {
-      try {
-        await _apiQuery(file);
-        if (await file.exists()) {
-          golfCourse = Course.fromJson(await file.readAsString());
-          // Save to Firestore so other users benefit
-          try {
-            await CourseRepository().saveCourse(golfCourse!);
-            debugPrint('Course saved to Firestore');
-          } catch (e) {
-            debugPrint('Firestore save failed (non-fatal): $e');
-          }
-        }
-      } catch (e) {
-        debugPrint('Overpass API failed: $e');
-      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Course data not found for ${widget.courseName}.';
+      });
+      return;
     }
-
-    if (golfCourse == null) return;
 
     final player = Player(name: 'Rick');
     setState(() {
@@ -567,8 +486,6 @@ out geom;
           FloatingActionButton(
             heroTag: 'add_shot_button',
             onPressed: () {
-              // This is where you would record a shot.
-              // For now, it just prints the current location.
               if (_currentPlayerPos != null) {
                 debugPrint('Recording shot at: $_currentPlayerPos');
               }
@@ -620,7 +537,6 @@ out geom;
     final hole = _round!.course.holes[holeIndex];
     final pin = hole.pin;
 
-    // Tee positions: teeBox nodes first, then teePlatform centroids
     LatLng? centroid(List<LatLng> pts) {
       if (pts.isEmpty) return null;
       return LatLng(
@@ -636,18 +552,14 @@ out geom;
           .whereType<LatLng>(),
     ];
 
-    // Bearing from play line: tee → first fairway centroid (handles doglegs)
     final playLine = hole.playLine();
     final double bearing = playLine.length >= 2
         ? const Distance().bearing(playLine.first, playLine[1])
         : 0.0;
 
-    // Fix 1: rotate BEFORE fitCamera so flutter_map accounts for the rotation
-    // when computing zoom — prevents clipped corners
     _mapController.rotate(-bearing);
 
     if (teePositions.isEmpty) {
-      // Fix 3: no tee data but we still applied rotation above
       _mapController.move(pin, 16);
       return;
     }
