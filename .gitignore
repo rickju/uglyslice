@@ -1,3 +1,9 @@
+play-yard/
+website/
+work-log/
+temp/
+
+
 # Miscellaneous
 *.class
 *.lock

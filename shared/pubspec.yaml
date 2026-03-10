@@ -1,0 +1,9 @@
+name: ugly_slice_shared
+description: Shared data models for ugly_slice (no Flutter, no geometry).
+publish_to: 'none'
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  latlong2: ^0.9.1
