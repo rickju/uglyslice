@@ -1,68 +1,71 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:latlong2/latlong.dart';
+import 'dart:convert';
+import 'package:sqflite/sqflite.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../models/course.dart';
-import '../models/jts.dart';
 
 class CourseRepository {
-  final _db = FirebaseFirestore.instance;
+  static Database? _db;
 
-  CollectionReference get _courses => _db.collection('courses');
-
-  Future<bool> courseExists(String courseId) async {
-    final doc = await _courses.doc(courseId).get();
-    return doc.exists;
+  Future<Database> get _database async {
+    if (_db != null) return _db!;
+    final dir = await getApplicationDocumentsDirectory();
+    _db = await openDatabase(
+      p.join(dir.path, 'ugly_slice.db'),
+      version: 1,
+      onCreate: (db, _) async {
+        await db.execute('''
+          CREATE TABLE courses (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            course_doc TEXT NOT NULL,
+            holes_doc TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          )
+        ''');
+      },
+    );
+    return _db!;
   }
 
-  /// Load course root doc + holes sub-collection from Firestore.
-  /// Returns null if not found.
+  /// Returns null if not in local cache.
   Future<Course?> fetchCourse(String courseId) async {
-    final doc = await _courses.doc(courseId).get();
-    if (!doc.exists) return null;
+    final db = await _database;
+    final rows = await db.query(
+      'courses',
+      where: 'id = ?',
+      whereArgs: [courseId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
 
-    final holeDocs = await _courses
-        .doc(courseId)
-        .collection('holes')
-        .orderBy('holeNumber')
-        .get();
-
-    final courseData = doc.data() as Map<String, dynamic>;
-    final holeMaps = holeDocs.docs
-        .map((d) => d.data())
+    final row = rows.first;
+    final courseDoc =
+        jsonDecode(row['course_doc'] as String) as Map<String, dynamic>;
+    final holeDocs = (jsonDecode(row['holes_doc'] as String) as List)
+        .map((h) => h as Map<String, dynamic>)
         .toList();
 
-    return Course.fromFirestore(courseData, holeMaps);
+    return Course.fromFirestore(courseDoc, holeDocs);
   }
 
-  /// Save course to Firestore. Uses a batch write so root doc + all hole
-  /// documents are committed atomically.
-  Future<void> saveCourse(Course course) async {
-    // Extract boundary points from the JTS polygon for storage.
-    final boundaryPts = _extractBoundaryPoints(course);
-
-    final batch = _db.batch();
-
-    // Root document
-    final courseRef = _courses.doc(course.id);
-    batch.set(courseRef, course.toFirestoreMap(boundaryPts));
-
-    // Hole sub-documents
-    for (final hole in course.holes) {
-      final holeRef = courseRef.collection('holes').doc('${hole.holeNumber}');
-      batch.set(holeRef, hole.toMap());
-    }
-
-    await batch.commit();
-  }
-
-  List<LatLng> _extractBoundaryPoints(Course course) {
-    try {
-      final coords = course.boundary.getExteriorRing()?.getCoordinates();
-      if (coords == null) return [];
-      return coords
-          .map((c) => LatLng(c.y, c.x))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+  /// Cache course data returned from the backend.
+  Future<void> saveCourse(
+    String courseId,
+    Map<String, dynamic> courseDoc,
+    List<Map<String, dynamic>> holeDocs,
+  ) async {
+    final db = await _database;
+    await db.insert(
+      'courses',
+      {
+        'id': courseId,
+        'name': courseDoc['name'] as String? ?? '',
+        'course_doc': jsonEncode(courseDoc),
+        'holes_doc': jsonEncode(holeDocs),
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 }

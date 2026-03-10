@@ -110,3 +110,6 @@ The app handles complex golf course geometry:
 - Distance calculations from current position to pins/targets
 - Support for overlapping holes and shared fairways
 - Tee selection based on color/difficulty ratings
+
+
+
