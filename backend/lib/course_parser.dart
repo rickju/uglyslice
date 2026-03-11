@@ -201,6 +201,8 @@ class Hole {
       }
     }
 
+    // Fallback: last point of the hole way is the pin (OSM convention)
+    pin ??= way.points.isNotEmpty ? way.points.last : null;
     if (pin == null) return null;
 
     return Hole(

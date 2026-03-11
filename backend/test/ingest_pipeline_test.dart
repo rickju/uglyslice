@@ -5,13 +5,14 @@
 /// Run with defaults (Karori Golf Club):
 ///   dart test test/ingest_pipeline_test.dart
 ///
-/// Override course name / bbox:
-///   dart test test/ingest_pipeline_test.dart -DCOURSE_NAME="Royal Wellington Golf Club"
-///   dart test test/ingest_pipeline_test.dart -DCOURSE_NAME="..." -DBBOX="-47.5,166.0,-34.0,179.0"
+/// Override course name / bbox via environment variables:
+///   COURSE_NAME="Royal Wellington Golf Club" dart test test/ingest_pipeline_test.dart
+///   COURSE_NAME="..." BBOX="-47.5,166.0,-34.0,179.0" dart test test/ingest_pipeline_test.dart
 @Tags(['integration'])
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
@@ -21,10 +22,10 @@ import 'package:ugly_slice_backend/course_parser.dart';
 // Config
 // ---------------------------------------------------------------------------
 
-const _courseName =
-    String.fromEnvironment('COURSE_NAME', defaultValue: 'Karori Golf Club');
-const _bbox =
-    String.fromEnvironment('BBOX', defaultValue: '-47.5,166.0,-34.0,179.0');
+final _courseName =
+    Platform.environment['COURSE_NAME'] ?? 'Karori Golf Club';
+final _bbox =
+    Platform.environment['BBOX'] ?? '-47.5,166.0,-34.0,179.0';
 const _overpassUrl = 'https://overpass-api.de/api/interpreter';
 
 // ---------------------------------------------------------------------------
