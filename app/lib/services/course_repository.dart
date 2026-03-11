@@ -1,71 +1,41 @@
 import 'dart:convert';
-import 'package:sqflite/sqflite.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+
+import 'package:drift/drift.dart';
+
+import '../database/app_database.dart';
 import '../models/course.dart';
 
 class CourseRepository {
-  static Database? _db;
+  final AppDatabase _db;
 
-  Future<Database> get _database async {
-    if (_db != null) return _db!;
-    final dir = await getApplicationDocumentsDirectory();
-    _db = await openDatabase(
-      p.join(dir.path, 'ugly_slice.db'),
-      version: 1,
-      onCreate: (db, _) async {
-        await db.execute('''
-          CREATE TABLE courses (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            course_doc TEXT NOT NULL,
-            holes_doc TEXT NOT NULL,
-            updated_at INTEGER NOT NULL
-          )
-        ''');
-      },
-    );
-    return _db!;
-  }
+  CourseRepository(this._db);
 
-  /// Returns null if not in local cache.
+  /// Returns the cached course or null if not in local DB.
   Future<Course?> fetchCourse(String courseId) async {
-    final db = await _database;
-    final rows = await db.query(
-      'courses',
-      where: 'id = ?',
-      whereArgs: [courseId],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
+    final row = await (_db.select(_db.courses)
+          ..where((t) => t.id.equals(courseId)))
+        .getSingleOrNull();
+    if (row == null) return null;
 
-    final row = rows.first;
     final courseDoc =
-        jsonDecode(row['course_doc'] as String) as Map<String, dynamic>;
-    final holeDocs = (jsonDecode(row['holes_doc'] as String) as List)
-        .map((h) => h as Map<String, dynamic>)
-        .toList();
-
+        jsonDecode(row.courseDoc) as Map<String, dynamic>;
+    final holeDocs = (jsonDecode(row.holesDoc) as List)
+        .cast<Map<String, dynamic>>();
     return Course.fromFirestore(courseDoc, holeDocs);
   }
 
-  /// Cache course data returned from the backend.
+  /// Upsert course data returned from the backend.
   Future<void> saveCourse(
     String courseId,
     Map<String, dynamic> courseDoc,
     List<Map<String, dynamic>> holeDocs,
   ) async {
-    final db = await _database;
-    await db.insert(
-      'courses',
-      {
-        'id': courseId,
-        'name': courseDoc['name'] as String? ?? '',
-        'course_doc': jsonEncode(courseDoc),
-        'holes_doc': jsonEncode(holeDocs),
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await _db.into(_db.courses).insertOnConflictUpdate(CoursesCompanion(
+          id: Value(courseId),
+          name: Value(courseDoc['name'] as String? ?? ''),
+          courseDoc: Value(jsonEncode(courseDoc)),
+          holesDoc: Value(jsonEncode(holeDocs)),
+          updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+        ));
   }
 }

@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'models/course.dart';
 import 'services/course_repository.dart';
+import 'main.dart' show db;
 
 const _backendUrl = String.fromEnvironment(
   'BACKEND_URL',
@@ -47,7 +48,7 @@ class _RoundPageState extends State<RoundPage> {
 
   Future<void> _loadCourse() async {
     Course? golfCourse;
-    final repo = CourseRepository();
+    final repo = CourseRepository(db);
     // courseId is assigned by the backend as "course_{osmWayId}".
     // For cache lookup we first try the stable ID derived from the name;
     // after fetching we use the real ID returned by the backend.

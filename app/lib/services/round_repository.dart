@@ -1,100 +1,83 @@
 import 'dart:convert';
-import 'package:sqflite/sqflite.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+
+import 'package:drift/drift.dart';
+
+import '../database/app_database.dart';
 import '../models/round.dart';
 
 class RoundRepository {
-  static Database? _db;
+  final AppDatabase _db;
 
-  Future<Database> get _database async {
-    if (_db != null) return _db!;
-    final dir = await getApplicationDocumentsDirectory();
-    _db = await openDatabase(
-      p.join(dir.path, 'ugly_slice.db'),
-      version: 1,
-      onCreate: (db, _) async {
-        await db.execute('''
-          CREATE TABLE rounds (
-            id TEXT PRIMARY KEY,
-            player_name TEXT NOT NULL,
-            date INTEGER NOT NULL,
-            data TEXT NOT NULL
-          )
-        ''');
-      },
-    );
-    return _db!;
-  }
+  RoundRepository(this._db);
 
-  /// Save a new round. Returns the generated document ID.
+  // ── Writes ───────────────────────────────────────────────────────────────────
+
+  /// Save a new round locally. Returns the round's id.
   Future<String> saveRound(Round round) async {
-    final db = await _database;
-    final id = DateTime.now().millisecondsSinceEpoch.toString();
-    final map = round.toMap();
-    map['date'] = round.date.millisecondsSinceEpoch;
-    await db.insert('rounds', {
-      'id': id,
-      'player_name': round.player.name,
-      'date': round.date.millisecondsSinceEpoch,
-      'data': jsonEncode(map),
-    });
-    return id;
+    await _db.into(_db.rounds).insert(
+          _toCompanion(round),
+          mode: InsertMode.insertOrIgnore,
+        );
+    return round.id;
   }
 
-  /// Overwrite an existing round document.
+  /// Overwrite an existing round, bumping updatedAt.
   Future<void> updateRound(String roundId, Round round) async {
-    final db = await _database;
-    final map = round.toMap();
-    map['date'] = round.date.millisecondsSinceEpoch;
-    await db.update(
-      'rounds',
-      {
-        'player_name': round.player.name,
-        'date': round.date.millisecondsSinceEpoch,
-        'data': jsonEncode(map),
-      },
-      where: 'id = ?',
-      whereArgs: [roundId],
+    final updated = round.copyWith(
+      id: roundId,
+      updatedAt: DateTime.now().toUtc(),
     );
+    await _db.update(_db.rounds).replace(_toCompanion(updated));
   }
 
-  /// List all rounds for a player, newest first.
-  /// Returns raw maps including the document id.
-  Future<List<Map<String, dynamic>>> listRoundsForPlayer(
-      String playerName) async {
-    final db = await _database;
-    final rows = await db.query(
-      'rounds',
-      where: 'player_name = ?',
-      whereArgs: [playerName],
-      orderBy: 'date DESC',
-    );
-    return rows.map((row) {
-      final data =
-          jsonDecode(row['data'] as String) as Map<String, dynamic>;
-      // Normalise date back to DateTime for callers
-      data['date'] =
-          DateTime.fromMillisecondsSinceEpoch(row['date'] as int);
-      return {'id': row['id'] as String, ...data};
-    }).toList();
+  /// Soft-delete a round (propagates to Supabase via sync).
+  Future<void> deleteRound(String roundId) async {
+    await (_db.update(_db.rounds)..where((t) => t.id.equals(roundId)))
+        .write(RoundsCompanion(
+      deleted: const Value(true),
+      updatedAt: Value(DateTime.now().toUtc()),
+    ));
   }
 
-  /// Load a single round. Returns null if not found.
-  Future<Round?> loadRound(String roundId) async {
-    final db = await _database;
-    final rows = await db.query(
-      'rounds',
-      where: 'id = ?',
-      whereArgs: [roundId],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    final row = rows.first;
-    final data =
-        jsonDecode(row['data'] as String) as Map<String, dynamic>;
-    data['date'] =
-        DateTime.fromMillisecondsSinceEpoch(row['date'] as int);
-    return Round.fromScoreMap(data);
-  }
+  // ── Reads ────────────────────────────────────────────────────────────────────
+
+  /// List all non-deleted rounds for a player, newest first.
+  Future<List<Round>> listRoundsForPlayer(String playerName) =>
+      (_db.select(_db.rounds)
+            ..where((t) =>
+                t.playerName.equals(playerName) & t.deleted.equals(false))
+            ..orderBy([(t) => OrderingTerm.desc(t.date)]))
+          .get();
+
+  /// Load a single round by id. Returns null if not found or deleted.
+  Future<Round?> loadRound(String roundId) =>
+      (_db.select(_db.rounds)
+            ..where((t) =>
+                t.id.equals(roundId) & t.deleted.equals(false)))
+          .getSingleOrNull();
+
+  /// Reactive stream of non-deleted rounds for a player, newest first.
+  Stream<List<Round>> watchRoundsForPlayer(String playerName) =>
+      (_db.select(_db.rounds)
+            ..where((t) =>
+                t.playerName.equals(playerName) & t.deleted.equals(false))
+            ..orderBy([(t) => OrderingTerm.desc(t.date)]))
+          .watch();
+
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
+  static RoundsCompanion _toCompanion(Round r) => RoundsCompanion(
+        id: Value(r.id),
+        userId: Value(r.userId),
+        updatedAt: Value(r.updatedAt),
+        deleted: Value(r.deleted),
+        playerName: Value(r.player.name),
+        playerHandicap: Value(r.player.handicap),
+        courseId: Value(r.course.id),
+        courseName: Value(r.course.name),
+        date: Value(r.date),
+        status: Value(r.status),
+        data: Value(jsonEncode(
+            {'holePlays': r.holePlays.map((h) => h.toMap()).toList()})),
+      );
 }

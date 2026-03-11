@@ -31,16 +31,21 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   dart_jts: ^0.3.0+1
   collection: ^1.19.1
   flutter_map: ^8.2.2
   latlong2: ^0.9.1
   http: ^1.6.0
-  sqflite: ^2.3.3
+  geolocator: ^10.1.0
   path_provider: ^2.1.5
+  # Offline-first / sync
+  drift: ^2.26.0
+  drift_flutter: ^0.2.4
+  syncable: ^1.0.3
+  supabase_flutter: ^2.0.0
+  uuid: ^4.5.1
+  equatable: ^2.0.7
   ugly_slice_shared:
     path: ../shared
 
@@ -48,7 +53,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  geolocator: ^10.1.0          # 获取 GPS 位置
+  drift_dev: ^2.26.0
+  build_runner: ^2.4.0
   flutter_launcher_icons: ^0.13.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
