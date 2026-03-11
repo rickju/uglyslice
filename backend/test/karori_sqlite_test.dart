@@ -75,7 +75,7 @@ void main() {
   late Map<int, Map<String, dynamic>> byNum;
 
   setUpAll(() async {
-    final file = File('../app/karori.json');
+    final file = File('../karori.json');
     if (!await file.exists()) {
       throw StateError('karori.json not found — run tests from backend/ dir');
     }
