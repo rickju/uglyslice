@@ -1,128 +1,162 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Import for rootBundle
-import 'dart:convert';
+
+import 'database/app_database.dart';
+import 'main.dart' show db, courseSyncService;
 import 'round_page.dart';
-
-// A simple class to hold the compact course data
-class CompactCourse {
-  final String name;
-  final double lat;
-  final double lon;
-
-  CompactCourse({required this.name, required this.lat, required this.lon});
-
-  factory CompactCourse.fromJson(Map<String, dynamic> json) {
-    return CompactCourse(
-      name: json['name'],
-      lat: json['lat'],
-      lon: json['lon'],
-    );
-  }
-}
+import 'services/course_list_repository.dart';
+import 'services/course_repository.dart';
 
 class CourseSelectionPage extends StatefulWidget {
   const CourseSelectionPage({super.key});
 
   @override
-  _CourseSelectionPageState createState() => _CourseSelectionPageState();
+  State<CourseSelectionPage> createState() => _CourseSelectionPageState();
 }
 
 class _CourseSelectionPageState extends State<CourseSelectionPage> {
+  late final CourseListRepository _repo;
+  late final CourseRepository _courseRepo;
   final TextEditingController _searchController = TextEditingController();
-  List<CompactCourse> _allCourses = []; // Store all courses from the local file
-  List<CompactCourse> _searchResults = [];
-  bool _isLoading = false;
+
+  List<CourseListRow> _results = [];
+  bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadLocalCourses();
+    _repo = CourseListRepository(db);
+    _courseRepo = CourseRepository(db);
+    _loadAll();
   }
 
-  Future<void> _loadLocalCourses() async {
+  Future<void> _sync() async {
     setState(() {
       _isLoading = true;
+      _error = null;
     });
-
     try {
-      // Corrected to load from the root asset path
-      final String jsonString = await rootBundle.loadString(
-        'nz-course-compact.json',
-      );
-      final List<dynamic> data = json.decode(jsonString);
-      setState(() {
-        _allCourses = data
-            .map((courseJson) => CompactCourse.fromJson(courseJson))
-            .toList();
-        _searchResults = _allCourses; // Initially, show all courses
-      });
+      await courseSyncService.syncAll();
+      await _loadAll();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load local courses: $e')),
-      );
-    } finally {
       setState(() {
         _isLoading = false;
+        _error = 'Sync failed: $e';
       });
     }
   }
 
-  void _filterCourses(String query) {
+  Future<void> _loadAll() async {
+    final courses = await _repo.listCourses();
     setState(() {
-      if (query.isEmpty) {
-        _searchResults = _allCourses;
-      } else {
-        _searchResults = _allCourses.where((course) {
-          return course.name.toLowerCase().contains(query.toLowerCase());
-        }).toList();
-      }
+      _results = courses;
+      _isLoading = false;
     });
+  }
+
+
+  Future<void> _search(String query) async {
+    final courses = query.isEmpty
+        ? await _repo.listCourses()
+        : await _repo.search(query);
+    setState(() => _results = courses);
+  }
+
+  Future<void> _openCourse(CourseListRow course) async {
+    final courseId = 'osm_${course.id}';
+
+    // Cache hit → navigate immediately
+    final cached = await _courseRepo.fetchCourse(courseId);
+    if (cached != null) {
+      if (!mounted) return;
+      _navigate(courseId, course.name);
+      return;
+    }
+
+    // Cache miss → course not yet synced
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${course.name} not yet synced.'),
+        action: SnackBarAction(
+          label: 'Sync now',
+          onPressed: _sync,
+        ),
+      ),
+    );
+  }
+
+  void _navigate(String courseId, String courseName) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RoundPage(courseId: courseId, courseName: courseName),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Select a Golf Course')),
+      appBar: AppBar(
+        title: const Text('Select a Golf Course'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Sync courses',
+            onPressed: _isLoading ? null : _sync,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(8),
             child: TextField(
               controller: _searchController,
-              decoration: InputDecoration(
-                labelText: 'Search for a course',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () => _filterCourses(_searchController.text),
-                ),
+              decoration: const InputDecoration(
+                labelText: 'Search',
+                prefixIcon: Icon(Icons.search),
               ),
-              onChanged: (value) => _filterCourses(value),
+              onChanged: _search,
             ),
           ),
-          _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : Expanded(
-                  child: ListView.builder(
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) {
-                      final course = _searchResults[index];
-
-                      return ListTile(
-                        title: Text(course.name),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              // XXX builder: (context) => RoundPage(courseName: course.name),
-                              builder: (context) =>
-                                  RoundPage(courseName: 'Karori Golf Club'),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+          if (_isLoading)
+            const Expanded(
+                child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_error!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                        onPressed: _sync, child: const Text('Retry')),
+                  ],
                 ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: _results.length,
+                itemBuilder: (context, i) {
+                  final course = _results[i];
+                  return ListTile(
+                    title: Text(course.name),
+                    onTap: () => _openCourse(course),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
