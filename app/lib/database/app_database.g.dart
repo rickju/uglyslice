@@ -819,16 +819,357 @@ class CoursesCompanion extends UpdateCompanion<CourseRow> {
   }
 }
 
+class $CourseListTableTable extends CourseListTable
+    with TableInfo<$CourseListTableTable, CourseListRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CourseListTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _latMeta = const VerificationMeta('lat');
+  @override
+  late final GeneratedColumn<double> lat = GeneratedColumn<double>(
+    'lat',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lonMeta = const VerificationMeta('lon');
+  @override
+  late final GeneratedColumn<double> lon = GeneratedColumn<double>(
+    'lon',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, type, lat, lon];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'course_list_table';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CourseListRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
+    if (data.containsKey('lat')) {
+      context.handle(
+        _latMeta,
+        lat.isAcceptableOrUnknown(data['lat']!, _latMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_latMeta);
+    }
+    if (data.containsKey('lon')) {
+      context.handle(
+        _lonMeta,
+        lon.isAcceptableOrUnknown(data['lon']!, _lonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_lonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CourseListRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CourseListRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
+      lat: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}lat'],
+      )!,
+      lon: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}lon'],
+      )!,
+    );
+  }
+
+  @override
+  $CourseListTableTable createAlias(String alias) {
+    return $CourseListTableTable(attachedDatabase, alias);
+  }
+}
+
+class CourseListRow extends DataClass implements Insertable<CourseListRow> {
+  final int id;
+  final String name;
+  final String type;
+  final double lat;
+  final double lon;
+  const CourseListRow({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.lat,
+    required this.lon,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['name'] = Variable<String>(name);
+    map['type'] = Variable<String>(type);
+    map['lat'] = Variable<double>(lat);
+    map['lon'] = Variable<double>(lon);
+    return map;
+  }
+
+  CourseListTableCompanion toCompanion(bool nullToAbsent) {
+    return CourseListTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      type: Value(type),
+      lat: Value(lat),
+      lon: Value(lon),
+    );
+  }
+
+  factory CourseListRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CourseListRow(
+      id: serializer.fromJson<int>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      type: serializer.fromJson<String>(json['type']),
+      lat: serializer.fromJson<double>(json['lat']),
+      lon: serializer.fromJson<double>(json['lon']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'name': serializer.toJson<String>(name),
+      'type': serializer.toJson<String>(type),
+      'lat': serializer.toJson<double>(lat),
+      'lon': serializer.toJson<double>(lon),
+    };
+  }
+
+  CourseListRow copyWith({
+    int? id,
+    String? name,
+    String? type,
+    double? lat,
+    double? lon,
+  }) => CourseListRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    type: type ?? this.type,
+    lat: lat ?? this.lat,
+    lon: lon ?? this.lon,
+  );
+  CourseListRow copyWithCompanion(CourseListTableCompanion data) {
+    return CourseListRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      type: data.type.present ? data.type.value : this.type,
+      lat: data.lat.present ? data.lat.value : this.lat,
+      lon: data.lon.present ? data.lon.value : this.lon,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CourseListRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('type: $type, ')
+          ..write('lat: $lat, ')
+          ..write('lon: $lon')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, type, lat, lon);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CourseListRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.type == this.type &&
+          other.lat == this.lat &&
+          other.lon == this.lon);
+}
+
+class CourseListTableCompanion extends UpdateCompanion<CourseListRow> {
+  final Value<int> id;
+  final Value<String> name;
+  final Value<String> type;
+  final Value<double> lat;
+  final Value<double> lon;
+  const CourseListTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.type = const Value.absent(),
+    this.lat = const Value.absent(),
+    this.lon = const Value.absent(),
+  });
+  CourseListTableCompanion.insert({
+    this.id = const Value.absent(),
+    required String name,
+    required String type,
+    required double lat,
+    required double lon,
+  }) : name = Value(name),
+       type = Value(type),
+       lat = Value(lat),
+       lon = Value(lon);
+  static Insertable<CourseListRow> custom({
+    Expression<int>? id,
+    Expression<String>? name,
+    Expression<String>? type,
+    Expression<double>? lat,
+    Expression<double>? lon,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (type != null) 'type': type,
+      if (lat != null) 'lat': lat,
+      if (lon != null) 'lon': lon,
+    });
+  }
+
+  CourseListTableCompanion copyWith({
+    Value<int>? id,
+    Value<String>? name,
+    Value<String>? type,
+    Value<double>? lat,
+    Value<double>? lon,
+  }) {
+    return CourseListTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      lat: lat ?? this.lat,
+      lon: lon ?? this.lon,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
+    }
+    if (lat.present) {
+      map['lat'] = Variable<double>(lat.value);
+    }
+    if (lon.present) {
+      map['lon'] = Variable<double>(lon.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CourseListTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('type: $type, ')
+          ..write('lat: $lat, ')
+          ..write('lon: $lon')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $RoundsTable rounds = $RoundsTable(this);
   late final $CoursesTable courses = $CoursesTable(this);
+  late final $CourseListTableTable courseListTable = $CourseListTableTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [rounds, courses];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    rounds,
+    courses,
+    courseListTable,
+  ];
 }
 
 typedef $$RoundsTableCreateCompanionBuilder =
@@ -1339,6 +1680,202 @@ typedef $$CoursesTableProcessedTableManager =
       CourseRow,
       PrefetchHooks Function()
     >;
+typedef $$CourseListTableTableCreateCompanionBuilder =
+    CourseListTableCompanion Function({
+      Value<int> id,
+      required String name,
+      required String type,
+      required double lat,
+      required double lon,
+    });
+typedef $$CourseListTableTableUpdateCompanionBuilder =
+    CourseListTableCompanion Function({
+      Value<int> id,
+      Value<String> name,
+      Value<String> type,
+      Value<double> lat,
+      Value<double> lon,
+    });
+
+class $$CourseListTableTableFilterComposer
+    extends Composer<_$AppDatabase, $CourseListTableTable> {
+  $$CourseListTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get lat => $composableBuilder(
+    column: $table.lat,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get lon => $composableBuilder(
+    column: $table.lon,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CourseListTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $CourseListTableTable> {
+  $$CourseListTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get lat => $composableBuilder(
+    column: $table.lat,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get lon => $composableBuilder(
+    column: $table.lon,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CourseListTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CourseListTableTable> {
+  $$CourseListTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<double> get lat =>
+      $composableBuilder(column: $table.lat, builder: (column) => column);
+
+  GeneratedColumn<double> get lon =>
+      $composableBuilder(column: $table.lon, builder: (column) => column);
+}
+
+class $$CourseListTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CourseListTableTable,
+          CourseListRow,
+          $$CourseListTableTableFilterComposer,
+          $$CourseListTableTableOrderingComposer,
+          $$CourseListTableTableAnnotationComposer,
+          $$CourseListTableTableCreateCompanionBuilder,
+          $$CourseListTableTableUpdateCompanionBuilder,
+          (
+            CourseListRow,
+            BaseReferences<_$AppDatabase, $CourseListTableTable, CourseListRow>,
+          ),
+          CourseListRow,
+          PrefetchHooks Function()
+        > {
+  $$CourseListTableTableTableManager(
+    _$AppDatabase db,
+    $CourseListTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CourseListTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CourseListTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CourseListTableTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<double> lat = const Value.absent(),
+                Value<double> lon = const Value.absent(),
+              }) => CourseListTableCompanion(
+                id: id,
+                name: name,
+                type: type,
+                lat: lat,
+                lon: lon,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String name,
+                required String type,
+                required double lat,
+                required double lon,
+              }) => CourseListTableCompanion.insert(
+                id: id,
+                name: name,
+                type: type,
+                lat: lat,
+                lon: lon,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CourseListTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CourseListTableTable,
+      CourseListRow,
+      $$CourseListTableTableFilterComposer,
+      $$CourseListTableTableOrderingComposer,
+      $$CourseListTableTableAnnotationComposer,
+      $$CourseListTableTableCreateCompanionBuilder,
+      $$CourseListTableTableUpdateCompanionBuilder,
+      (
+        CourseListRow,
+        BaseReferences<_$AppDatabase, $CourseListTableTable, CourseListRow>,
+      ),
+      CourseListRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1347,4 +1884,6 @@ class $AppDatabaseManager {
       $$RoundsTableTableManager(_db, _db.rounds);
   $$CoursesTableTableManager get courses =>
       $$CoursesTableTableManager(_db, _db.courses);
+  $$CourseListTableTableTableManager get courseListTable =>
+      $$CourseListTableTableTableManager(_db, _db.courseListTable);
 }

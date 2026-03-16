@@ -364,8 +364,8 @@ class Course {
         ]),
       );
 
-  // Reconstruct a Course from Firestore maps (no Overpass object).
-  factory Course.fromFirestore(
+  // Reconstruct a Course from stored maps (no Overpass object).
+  factory Course.fromMap(
     Map<String, dynamic> courseData,
     List<Map<String, dynamic>> holeMaps,
   ) {
@@ -394,8 +394,8 @@ class Course {
     );
   }
 
-  // Firestore root document map (excludes holes sub-collection).
-  Map<String, dynamic> toFirestoreMap(List<LatLng> boundaryPoints) => {
+  // Root document map (excludes holes sub-collection).
+  Map<String, dynamic> toDocMap(List<LatLng> boundaryPoints) => {
         'id': id,
         'name': name,
         'holeCount': holes.length,

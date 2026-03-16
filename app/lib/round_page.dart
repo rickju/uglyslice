@@ -5,22 +5,16 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'models/course.dart';
 import 'services/course_repository.dart';
 import 'main.dart' show db;
 
-const _backendUrl = String.fromEnvironment(
-  'BACKEND_URL',
-  defaultValue: 'http://10.0.2.2:8080', // Android emulator → host localhost
-);
-
 // page widget
 class RoundPage extends StatefulWidget {
+  final String courseId;
   final String courseName;
 
-  const RoundPage({super.key, required this.courseName});
+  const RoundPage({super.key, required this.courseId, required this.courseName});
 
   @override
   State<RoundPage> createState() => _RoundPageState();
@@ -47,71 +41,20 @@ class _RoundPageState extends State<RoundPage> {
   }
 
   Future<void> _loadCourse() async {
-    Course? golfCourse;
     final repo = CourseRepository(db);
-    // courseId is assigned by the backend as "course_{osmWayId}".
-    // For cache lookup we first try the stable ID derived from the name;
-    // after fetching we use the real ID returned by the backend.
-    final nameBasedId = 'course_${widget.courseName.replaceAll(' ', '_')}';
-
-    // 1. SQLite cache
-    try {
-      golfCourse = await repo.fetchCourse(nameBasedId);
-      if (golfCourse != null) debugPrint('Loaded from SQLite cache');
-    } catch (e) {
-      debugPrint('SQLite fetch failed: $e');
-    }
-
-    // 2. Backend HTTP call — parses Overpass, returns full course JSON
-    if (golfCourse == null) {
-      try {
-        debugPrint('Fetching course from backend for ${widget.courseName}');
-        final response = await http.post(
-          Uri.parse('$_backendUrl/ingestCourse'),
-          headers: {'content-type': 'application/json'},
-          body: jsonEncode({'courseName': widget.courseName}),
-        );
-
-        if (response.statusCode == 200) {
-          final payload =
-              jsonDecode(response.body) as Map<String, dynamic>;
-          final courseId = payload['courseId'] as String;
-          final courseDoc =
-              payload['courseDoc'] as Map<String, dynamic>;
-          final holeDocs = (payload['holeDocs'] as List)
-              .map((h) => h as Map<String, dynamic>)
-              .toList();
-
-          // Cache locally then build the Course object
-          await repo.saveCourse(courseId, courseDoc, holeDocs);
-          golfCourse = Course.fromFirestore(courseDoc, holeDocs);
-          debugPrint('Loaded from backend and cached in SQLite');
-        } else {
-          final err = jsonDecode(response.body)['error'] ?? response.statusCode;
-          throw Exception('Backend error: $err');
-        }
-      } catch (e) {
-        debugPrint('Backend fetch failed: $e');
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Failed to load course data for ${widget.courseName}.\n'
-              'Make sure the backend is reachable at $_backendUrl.';
-        });
-        return;
-      }
-    }
+    final Course? golfCourse = await repo.fetchCourse(widget.courseId);
 
     if (golfCourse == null) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Course data not found for ${widget.courseName}.';
+        _errorMessage = 'Course data not found. Please go back and re-select the course.';
       });
       return;
     }
 
     final player = Player(name: 'Rick');
     setState(() {
-      _round = Round(player: player, course: golfCourse!, date: DateTime.now());
+      _round = Round(player: player, course: golfCourse, date: DateTime.now());
       _isLoading = false;
     });
     debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');

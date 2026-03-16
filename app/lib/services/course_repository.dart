@@ -21,7 +21,7 @@ class CourseRepository {
         jsonDecode(row.courseDoc) as Map<String, dynamic>;
     final holeDocs = (jsonDecode(row.holesDoc) as List)
         .cast<Map<String, dynamic>>();
-    return Course.fromFirestore(courseDoc, holeDocs);
+    return Course.fromMap(courseDoc, holeDocs);
   }
 
   /// Upsert course data returned from the backend.
