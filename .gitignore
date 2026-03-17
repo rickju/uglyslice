@@ -2,6 +2,8 @@ play-yard/
 website/
 work-log/
 temp/
+node_modules/
+package-lock.json
 
 
 # Miscellaneous

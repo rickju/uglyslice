@@ -7,6 +7,7 @@ Future<void> main(List<String> args) async =>
 FunctionTarget? _nameToFunctionTarget(String name) {
   return switch (name) {
     'ingestCourse' => FunctionTarget.http(ingestCourse),
+    'ingestAllNzCourses' => FunctionTarget.http(ingestAllNzCoursesHandler),
     _ => null,
   };
 }
