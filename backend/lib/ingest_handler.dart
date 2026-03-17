@@ -3,6 +3,7 @@ import 'package:functions_framework/functions_framework.dart';
 import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
 import 'course_parser.dart';
+import 'raw_json_store.dart';
 import 'supabase_client.dart';
 
 const _overpassUrl = 'https://overpass-api.de/api/interpreter';
@@ -26,29 +27,48 @@ Future<Response> ingestCourse(Request request) async {
 
   final bbox = params['bbox'] as String? ?? _nzBbox;
 
+  print('Fetching: $courseName ...');
+
   // 1. Fetch from Overpass
   final query = _buildDetailQuery(courseName, bbox);
+  final fetchStart = DateTime.now();
   final overpassResponse = await http.post(
     Uri.parse(_overpassUrl),
     body: query,
   );
+  final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
   if (overpassResponse.statusCode != 200) {
+    print('  → Overpass: ${overpassResponse.statusCode} (error)');
     return Response.internalServerError(
         body: jsonEncode(
             {'error': 'Overpass returned ${overpassResponse.statusCode}'}),
         headers: {'content-type': 'application/json'});
   }
 
+  final rawBody = overpassResponse.body;
+  final overpassData = jsonDecode(rawBody) as Map<String, dynamic>;
+  final elementCount =
+      (overpassData['elements'] as List<dynamic>? ?? []).length;
+  print('  → Overpass: 200 OK, $elementCount elements (${fetchMs}ms)');
+
+  // Cache raw JSON
+  final store = RawJsonStore();
+  await store.save(courseName, rawBody, elementCount);
+  print('  → Cached raw JSON to ${store.dbPath}');
+
   // 2. Parse
+  print('  → Parsing ...');
   final ParsedCourse parsed;
   try {
-    parsed = parseCourse(overpassResponse.body);
+    parsed = parseCourse(rawBody);
   } catch (e) {
+    print('  → Parse FAILED: $e');
     return Response.internalServerError(
         body: jsonEncode({'error': 'Parse failed: $e'}),
         headers: {'content-type': 'application/json'});
   }
+  print('  → Parsed: ${parsed.courseId}, ${parsed.holeDocs.length} holes');
 
   // 3. Upsert to Supabase
   try {
@@ -62,7 +82,9 @@ Future<Response> ingestCourse(Request request) async {
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }
     ]);
+    print('  → Upserted to Supabase ✓');
   } catch (e) {
+    print('  → Supabase upsert FAILED: $e');
     return Response.internalServerError(
         body: jsonEncode({'error': 'Supabase upsert failed: $e'}),
         headers: {'content-type': 'application/json'});
@@ -143,26 +165,48 @@ out center tags;
   // 3. For each course: fetch details from Overpass, parse, upsert courses
   int succeeded = 0;
   int failed = 0;
-  for (final course in byName.values) {
+  final courseList = byName.values.toList();
+  final total = courseList.length;
+  final store = RawJsonStore();
+
+  for (int i = 0; i < total; i++) {
+    final course = courseList[i];
     final name = course['name'] as String;
+    print('\n[${i + 1}/$total] Fetching: $name ...');
     try {
       final detailQuery = _buildDetailQuery(name, _nzBbox);
+      final fetchStart = DateTime.now();
       final detailResponse = await http
           .post(Uri.parse(_overpassUrl), body: detailQuery)
           .timeout(const Duration(seconds: 60));
+      final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
       if (detailResponse.statusCode != 200) {
+        print('  → Overpass: ${detailResponse.statusCode} (error)');
         failed++;
         continue;
       }
 
+      final rawBody = detailResponse.body;
+      final overpassData = jsonDecode(rawBody) as Map<String, dynamic>;
+      final elementCount =
+          (overpassData['elements'] as List<dynamic>? ?? []).length;
+      print('  → Overpass: 200 OK, $elementCount elements (${fetchMs}ms)');
+
+      await store.save(name, rawBody, elementCount);
+      print('  → Cached raw JSON to ${store.dbPath}');
+
+      print('  → Parsing ...');
       final ParsedCourse parsed;
       try {
-        parsed = parseCourse(detailResponse.body);
-      } catch (_) {
+        parsed = parseCourse(rawBody);
+      } catch (e) {
+        print('  → Parse FAILED: $e');
+        print('  → Skipping Supabase upsert');
         failed++;
         continue;
       }
+      print('  → Parsed: ${parsed.courseId}, ${parsed.holeDocs.length} holes');
 
       await supabase.upsert('courses', [
         {
@@ -173,15 +217,19 @@ out center tags;
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }
       ]);
+      print('  → Upserted to Supabase ✓');
       succeeded++;
-    } catch (_) {
+    } catch (e) {
+      print('  → ERROR: $e');
       failed++;
     }
   }
 
+  print('\nDone. courseList=$total  succeeded=$succeeded  failed=$failed');
+
   return Response.ok(
     jsonEncode({
-      'courseListCount': byName.length,
+      'courseListCount': total,
       'coursesSucceeded': succeeded,
       'coursesFailed': failed,
     }),
