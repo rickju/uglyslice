@@ -25,6 +25,23 @@ Future<void> main(List<String> args) async {
     case 'ingest-all':
       await ingestAllNzCourses();
 
+    case 'query-course':
+      if (args.length < 2) {
+        print('Error: query-course requires a course name.');
+        print('  Usage: dart run bin/cli.dart query-course "Course Name"');
+        exit(1);
+      }
+      await queryCourse(args[1]);
+
+    case 'check-integrity':
+      if (args.length < 2) {
+        print('Error: check-integrity requires a course name.');
+        print('  Usage: dart run bin/cli.dart check-integrity "Course Name"');
+        exit(1);
+      }
+      final bbox = args.length > 2 ? args[2] : null;
+      await checkCourseIntegrity(args[1], bbox: bbox);
+
     case 'check-course':
       if (args.length < 2) {
         print('Error: check-course requires a course name.');
@@ -48,4 +65,6 @@ void _usage() {
   print('  ingest-course <name> [bbox]   Fetch, parse, and upsert a single course');
   print('  ingest-all                    Fetch and upsert all NZ courses');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
+  print('  query-course  <name>          Query Supabase for a stored course and print details');
+  print('  check-integrity <name> [bbox] Fetch, parse, and report integrity issues');
 }

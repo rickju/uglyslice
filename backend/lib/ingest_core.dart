@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'course_integrity.dart';
 import 'course_parser.dart';
 import 'raw_json_store.dart';
 import 'supabase_client.dart';
@@ -186,6 +187,101 @@ out center tags;
 
   print('\nDone. courseList=$total  succeeded=$succeeded  failed=$failed');
   return (total: total, succeeded: succeeded, failed: failed);
+}
+
+/// Query Supabase for a stored course and print its details.
+Future<void> queryCourse(String courseName) async {
+  final supabase = SupabaseRestClient();
+  print('Querying Supabase for: $courseName ...\n');
+
+  final rows = await supabase.select(
+    'courses',
+    filters: 'name=eq.$courseName',
+    columns: 'id,name,course_doc,holes_doc,updated_at',
+  );
+
+  if (rows.isEmpty) {
+    print('Not found in Supabase.');
+    return;
+  }
+
+  final row = rows.first;
+  final courseDoc = row['course_doc'] is String
+      ? jsonDecode(row['course_doc'] as String) as Map<String, dynamic>
+      : row['course_doc'] as Map<String, dynamic>;
+  final holeDocs = row['holes_doc'] is String
+      ? (jsonDecode(row['holes_doc'] as String) as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+      : (row['holes_doc'] as List<dynamic>).cast<Map<String, dynamic>>();
+
+  print('=== ${row['name']} ===');
+  print('ID         : ${row['id']}');
+  print('Updated at : ${row['updated_at']}');
+  print('Holes      : ${holeDocs.length}');
+  print('Boundary pts: ${(courseDoc['boundaryPoints'] as List?)?.length ?? 0}');
+  print('');
+
+  for (final h in holeDocs) {
+    final num = (h['holeNumber'] as int).toString().padLeft(2);
+    final par = h['par'];
+    final hcp = h['handicapIndex'];
+    final fairways = (h['fairways'] as List).length;
+    final greens = (h['greens'] as List).length;
+    final tees = (h['teePlatforms'] as List).length;
+    final routingPts = (h['routingLine'] as List).length;
+    print('  Hole $num  par $par  hcp ${hcp.toString().padLeft(2)}'
+        '  fairways=$fairways  greens=$greens'
+        '  tee_platforms=$tees  routing_pts=$routingPts');
+  }
+}
+
+/// Fetch, parse, and run integrity checks on a course. Prints all issues found.
+Future<void> checkCourseIntegrity(String courseName, {String? bbox}) async {
+  final effectiveBbox = bbox ?? nzBbox;
+
+  print('Fetching: $courseName ...');
+  final query = buildDetailQuery(courseName, effectiveBbox);
+  final fetchStart = DateTime.now();
+  final response = await http.post(Uri.parse(overpassUrl), body: query);
+  final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+
+  if (response.statusCode != 200) {
+    print('Overpass error: ${response.statusCode}');
+    return;
+  }
+
+  final rawBody = response.body;
+  final elementCount =
+      ((jsonDecode(rawBody) as Map<String, dynamic>)['elements'] as List?)
+              ?.length ??
+          0;
+  print('Overpass: 200 OK, $elementCount elements (${fetchMs}ms)\n');
+
+  final ParsedCourse parsed;
+  try {
+    parsed = parseCourse(rawBody);
+  } catch (e) {
+    print('Parse FAILED: $e');
+    return;
+  }
+
+  print('=== ${parsed.courseDoc['name']}  '
+      '(${parsed.holeDocs.length} holes) ===\n');
+
+  final issues = checkIntegrity(parsed);
+  if (issues.isEmpty) {
+    print('No issues found — looks good!');
+    return;
+  }
+
+  final errors = issues.where((i) => i.severity == IssueSeverity.error).length;
+  final warnings =
+      issues.where((i) => i.severity == IssueSeverity.warning).length;
+
+  for (final issue in issues) {
+    print(issue);
+  }
+  print('\n$errors error(s)  $warnings warning(s)');
 }
 
 /// Fetch and parse a course, print detailed breakdown. No Supabase upsert.
