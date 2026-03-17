@@ -188,6 +188,55 @@ out center tags;
   return (total: total, succeeded: succeeded, failed: failed);
 }
 
+/// Fetch and parse a course, print detailed breakdown. No Supabase upsert.
+Future<void> checkCourse(String courseName, {String? bbox}) async {
+  final effectiveBbox = bbox ?? nzBbox;
+
+  print('Fetching: $courseName ...');
+
+  final query = buildDetailQuery(courseName, effectiveBbox);
+  final fetchStart = DateTime.now();
+  final overpassResponse =
+      await http.post(Uri.parse(overpassUrl), body: query);
+  final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+
+  if (overpassResponse.statusCode != 200) {
+    print('Overpass error: ${overpassResponse.statusCode}');
+    return;
+  }
+
+  final rawBody = overpassResponse.body;
+  final overpassData = jsonDecode(rawBody) as Map<String, dynamic>;
+  final elementCount =
+      (overpassData['elements'] as List<dynamic>? ?? []).length;
+  print('Overpass: 200 OK, $elementCount elements (${fetchMs}ms)\n');
+
+  final ParsedCourse parsed;
+  try {
+    parsed = parseCourse(rawBody);
+  } catch (e) {
+    print('Parse FAILED: $e');
+    return;
+  }
+
+  print('=== ${parsed.courseDoc['name']} ===');
+  print('ID    : ${parsed.courseId}');
+  print('Holes : ${parsed.holeDocs.length}');
+  print('');
+
+  for (final h in parsed.holeDocs) {
+    final num = (h['holeNumber'] as int).toString().padLeft(2);
+    final par = h['par'];
+    final fairways = (h['fairways'] as List).length;
+    final greens = (h['greens'] as List).length;
+    final tees = (h['teePlatforms'] as List).length;
+    final routingPts = (h['routingLine'] as List).length;
+    print('  Hole $num  par $par'
+        '  fairways=$fairways  greens=$greens'
+        '  tee_platforms=$tees  routing_pts=$routingPts');
+  }
+}
+
 String buildDetailQuery(String courseName, String bbox) => '''
 [out:json][timeout:25];
 (

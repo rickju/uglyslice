@@ -25,6 +25,15 @@ Future<void> main(List<String> args) async {
     case 'ingest-all':
       await ingestAllNzCourses();
 
+    case 'check-course':
+      if (args.length < 2) {
+        print('Error: check-course requires a course name.');
+        print('  Usage: dart run bin/cli.dart check-course "Course Name"');
+        exit(1);
+      }
+      final bbox = args.length > 2 ? args[2] : null;
+      await checkCourse(args[1], bbox: bbox);
+
     default:
       print('Unknown command: ${args[0]}');
       _usage();
@@ -38,4 +47,5 @@ void _usage() {
   print('Commands:');
   print('  ingest-course <name> [bbox]   Fetch, parse, and upsert a single course');
   print('  ingest-all                    Fetch and upsert all NZ courses');
+  print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
 }
