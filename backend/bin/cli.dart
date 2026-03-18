@@ -27,6 +27,17 @@ Future<void> main(List<String> args) async {
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
       await ingestAllNzCourses(limit: limit);
 
+    case 'ingest-region':
+      if (args.length < 2) {
+        print('Error: ingest-region requires a region name.');
+        print(
+            '  Usage: dart run bin/cli.dart ingest-region "New Zealand" [--limit N]');
+        exit(1);
+      }
+      final limitArg = args.indexOf('--limit');
+      final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
+      await ingestRegion(args[1], limit: limit);
+
     case 'query-course':
       if (args.length < 2) {
         print('Error: query-course requires a course name.');
@@ -64,8 +75,9 @@ void _usage() {
   print('Usage: dart run bin/cli.dart <command> [args]');
   print('');
   print('Commands:');
-  print('  ingest-course <name> [bbox]   Fetch, parse, and upsert a single course');
-  print('  ingest-all                    Fetch and upsert all NZ courses');
+  print('  ingest-course <name> [bbox]  Fetch, parse, and upsert a single course');
+  print('  ingest-all [--limit N]        Fetch and upsert all NZ courses');
+  print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
   print('  query-course  <name>          Query Supabase for a stored course and print details');
   print('  check-integrity <name> [bbox] Fetch, parse, and report integrity issues');

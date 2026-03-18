@@ -1,7 +1,8 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-/// SQLite cache for raw Overpass API responses.
-/// Allows re-parsing without re-querying Overpass.
+/// SQLite store for raw Overpass API responses.
+/// Every fetch is appended as a new row — no overwrites — so the full history
+/// is preserved for re-parsing and debugging.
 class RawJsonStore {
   final String dbPath;
 
@@ -23,34 +24,49 @@ class RawJsonStore {
     _ensureFfi();
     _db = await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE overpass_cache (
-            name          TEXT PRIMARY KEY,
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT NOT NULL,
             raw_json      TEXT NOT NULL,
             element_count INTEGER NOT NULL,
             fetched_at    INTEGER NOT NULL
           )
         ''');
+        await db.execute(
+            'CREATE INDEX idx_overpass_cache_name ON overpass_cache (name)');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Migrate: drop old name-keyed table, create append-only one.
+          await db.execute('DROP TABLE IF EXISTS overpass_cache');
+          await db.execute('''
+            CREATE TABLE overpass_cache (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              name          TEXT NOT NULL,
+              raw_json      TEXT NOT NULL,
+              element_count INTEGER NOT NULL,
+              fetched_at    INTEGER NOT NULL
+            )
+          ''');
+          await db.execute(
+              'CREATE INDEX idx_overpass_cache_name ON overpass_cache (name)');
+        }
       },
     );
     return _db!;
   }
 
-  Future<void> save(
-      String courseName, String rawJson, int elementCount) async {
+  Future<void> save(String name, String rawJson, int elementCount) async {
     final db = await _open();
-    await db.insert(
-      'overpass_cache',
-      {
-        'name': courseName,
-        'raw_json': rawJson,
-        'element_count': elementCount,
-        'fetched_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('overpass_cache', {
+      'name': name,
+      'raw_json': rawJson,
+      'element_count': elementCount,
+      'fetched_at': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   Future<void> close() async {

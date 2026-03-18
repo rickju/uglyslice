@@ -62,28 +62,23 @@ Future<String> ingestOneCourse(String courseName, {String? bbox}) async {
 
 typedef IngestAllResult = ({int total, int succeeded, int failed});
 
-/// Fetch all NZ courses from Overpass, upsert course_list, then parse and
-/// upsert each course. Returns summary counts.
-Future<IngestAllResult> ingestAllNzCourses({int? limit}) async {
+/// Shared ingest logic: runs list+detail Overpass queries, upserts course_list,
+/// parses and upserts each course. [cacheKey] is the name used in the raw JSON
+/// cache. Returns summary counts.
+Future<IngestAllResult> _ingestFromQueries({
+  required String listQuery,
+  required String detailQuery,
+  required String cacheKey,
+  int? limit,
+}) async {
   final supabase = SupabaseRestClient();
-
-  final listQuery = '''
-[out:json][timeout:120];
-(
-  node["leisure"="golf_course"]($nzBbox);
-  way["leisure"="golf_course"]($nzBbox);
-  relation["leisure"="golf_course"]($nzBbox);
-);
-out center tags;
-''';
 
   final listResponse = await http
       .post(Uri.parse(overpassUrl), body: listQuery)
       .timeout(const Duration(seconds: 150));
 
   if (listResponse.statusCode != 200) {
-    throw Exception(
-        'Overpass list query failed: ${listResponse.statusCode}');
+    throw Exception('Overpass list query failed: ${listResponse.statusCode}');
   }
 
   final data = jsonDecode(listResponse.body) as Map<String, dynamic>;
@@ -121,29 +116,12 @@ out center tags;
   }
 
   final now = DateTime.now().toUtc().toIso8601String();
-  final courseListRows = byName.values
-      .map((c) => {...c, 'updated_at': now})
-      .toList();
+  final courseListRows =
+      byName.values.map((c) => {...c, 'updated_at': now}).toList();
   await supabase.upsert('course_list', courseListRows);
+  print('Upserted ${courseListRows.length} courses to course_list');
 
-  // Single bbox query for all course details — ways/relations with full geometry
-  // plus all golf features within them. Far fewer Overpass requests than one-per-course.
-  final detailQuery = '''
-[out:json][timeout:300];
-(
-  way["leisure"="golf_course"]($nzBbox);
-  relation["leisure"="golf_course"]($nzBbox);
-)->.courses;
-.courses out geom;
-(
-  node(area.courses)["golf"];
-  way(area.courses)["golf"];
-  relation(area.courses)["golf"];
-);
-out geom;
-''';
-
-  print('Fetching all course details (single bbox query) ...');
+  print('Fetching all course details (single query) ...');
   final fetchStart = DateTime.now();
   final detailResponse = await http
       .post(Uri.parse(overpassUrl), body: detailQuery)
@@ -151,7 +129,8 @@ out geom;
   final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
   if (detailResponse.statusCode != 200) {
-    throw Exception('Overpass detail query failed: ${detailResponse.statusCode}');
+    throw Exception(
+        'Overpass detail query failed: ${detailResponse.statusCode}');
   }
 
   final rawBody = detailResponse.body;
@@ -160,15 +139,18 @@ out geom;
   print('Overpass: 200 OK, $elementCount elements (${fetchMs}ms)');
 
   final store = RawJsonStore();
-  await store.save('__all_nz__', rawBody, elementCount);
+  await store.save(cacheKey, rawBody, elementCount);
   print('Cached raw JSON to ${store.dbPath}');
 
   print('\nParsing all courses ...');
   final allParsed = parseAllCourses(rawBody);
   print('Found ${allParsed.length} parseable courses (way/relation geometry)\n');
 
-  final total = limit != null && limit < allParsed.length ? limit : allParsed.length;
-  if (limit != null) print('(limiting to $total of ${allParsed.length} parsed courses)');
+  final total =
+      limit != null && limit < allParsed.length ? limit : allParsed.length;
+  if (limit != null) {
+    print('(limiting to $total of ${allParsed.length} parsed courses)');
+  }
 
   int succeeded = 0;
   int failed = 0;
@@ -176,7 +158,8 @@ out geom;
   for (int i = 0; i < total; i++) {
     final parsed = allParsed[i];
     final name = parsed.courseDoc['name'] as String;
-    print('[${i + 1}/$total] ${parsed.courseId}  "$name"  ${parsed.holeDocs.length} holes');
+    print(
+        '[${i + 1}/$total] ${parsed.courseId}  "$name"  ${parsed.holeDocs.length} holes');
     try {
       await supabase.upsert('courses', [
         {
@@ -195,10 +178,88 @@ out geom;
     }
   }
 
-
   await store.close();
   print('\nDone. parsed=$total  succeeded=$succeeded  failed=$failed');
   return (total: total, succeeded: succeeded, failed: failed);
+}
+
+/// Fetch all NZ courses from Overpass, upsert course_list, then parse and
+/// upsert each course. Returns summary counts.
+Future<IngestAllResult> ingestAllNzCourses({int? limit}) {
+  final listQuery = '''
+[out:json][timeout:120];
+(
+  node["leisure"="golf_course"]($nzBbox);
+  way["leisure"="golf_course"]($nzBbox);
+  relation["leisure"="golf_course"]($nzBbox);
+);
+out center tags;
+''';
+
+  final detailQuery = '''
+[out:json][timeout:300];
+(
+  way["leisure"="golf_course"]($nzBbox);
+  relation["leisure"="golf_course"]($nzBbox);
+)->.courses;
+.courses out geom;
+(
+  node(area.courses)["golf"];
+  way(area.courses)["golf"];
+  relation(area.courses)["golf"];
+);
+out geom;
+''';
+
+  return _ingestFromQueries(
+    listQuery: listQuery,
+    detailQuery: detailQuery,
+    cacheKey: '__all_nz__',
+    limit: limit,
+  );
+}
+
+/// Fetch all courses in a named region (country, state, or county) from
+/// Overpass, upsert course_list, parse and upsert each course.
+Future<IngestAllResult> ingestRegion(String regionName, {int? limit}) {
+  final escaped = regionName.replaceAll('"', '\\"');
+
+  final listQuery = '''
+[out:json][timeout:120];
+area["name"="$escaped"]->.searchArea;
+(
+  node["leisure"="golf_course"](area.searchArea);
+  way["leisure"="golf_course"](area.searchArea);
+  relation["leisure"="golf_course"](area.searchArea);
+);
+out center tags;
+''';
+
+  final detailQuery = '''
+[out:json][timeout:300];
+area["name"="$escaped"]->.searchArea;
+(
+  way["leisure"="golf_course"](area.searchArea);
+  relation["leisure"="golf_course"](area.searchArea);
+)->.courses;
+.courses out geom;
+(
+  node(area.courses)["golf"];
+  way(area.courses)["golf"];
+  relation(area.courses)["golf"];
+);
+out geom;
+''';
+
+  final cacheKey =
+      '__region_${regionName.replaceAll(' ', '_').toLowerCase()}__';
+  print('Ingesting region: $regionName');
+  return _ingestFromQueries(
+    listQuery: listQuery,
+    detailQuery: detailQuery,
+    cacheKey: cacheKey,
+    limit: limit,
+  );
 }
 
 /// Query Supabase for a stored course and print its details.

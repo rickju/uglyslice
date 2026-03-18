@@ -276,7 +276,10 @@ List<ParsedCourse> parseAllCourses(String json) {
   final results = <ParsedCourse>[];
   for (final courseWay in courseWays) {
     try {
-      results.add(_parseCourseFromWay(overpass, courseWay));
+      final parsed = _parseCourseFromWay(overpass, courseWay);
+      if (parsed.holeDocs.isEmpty) continue;
+      if ((parsed.courseDoc['name'] as String) == 'Unknown Golf Course') continue;
+      results.add(parsed);
     } catch (_) {
       // Skip individual failures silently — caller can compare counts
     }
