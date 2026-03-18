@@ -52,8 +52,7 @@ Future<void> main(List<String> args) async {
         print('  Usage: dart run bin/cli.dart check-integrity "Course Name"');
         exit(1);
       }
-      final bbox = args.length > 2 ? args[2] : null;
-      await checkCourseIntegrity(args[1], bbox: bbox);
+      await checkCourseIntegrity(args[1]);
 
     case 'check-course':
       if (args.length < 2) {
@@ -80,5 +79,5 @@ void _usage() {
   print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
   print('  query-course  <name>          Query Supabase for a stored course and print details');
-  print('  check-integrity <name> [bbox] Fetch, parse, and report integrity issues');
+  print('  check-integrity <name>        Query Supabase and report integrity issues');
 }

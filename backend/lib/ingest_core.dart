@@ -308,38 +308,38 @@ Future<void> queryCourse(String courseName) async {
   }
 }
 
-/// Fetch, parse, and run integrity checks on a course. Prints all issues found.
-Future<void> checkCourseIntegrity(String courseName, {String? bbox}) async {
-  final effectiveBbox = bbox ?? nzBbox;
+/// Query Supabase for a stored course and run integrity checks on it.
+Future<void> checkCourseIntegrity(String courseName) async {
+  final supabase = SupabaseRestClient();
+  print('Querying Supabase for: $courseName ...\n');
 
-  print('Fetching: $courseName ...');
-  final query = buildDetailQuery(courseName, effectiveBbox);
-  final fetchStart = DateTime.now();
-  final response = await http.post(Uri.parse(overpassUrl), body: query);
-  final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+  final rows = await supabase.select(
+    'courses',
+    filters: 'name=eq.$courseName',
+    columns: 'id,name,course_doc,holes_doc',
+  );
 
-  if (response.statusCode != 200) {
-    print('Overpass error: ${response.statusCode}');
+  if (rows.isEmpty) {
+    print('Not found in Supabase. Run ingest-course or ingest-region first.');
     return;
   }
 
-  final rawBody = response.body;
-  final elementCount =
-      ((jsonDecode(rawBody) as Map<String, dynamic>)['elements'] as List?)
-              ?.length ??
-          0;
-  print('Overpass: 200 OK, $elementCount elements (${fetchMs}ms)\n');
+  final row = rows.first;
+  final courseDoc = row['course_doc'] is String
+      ? jsonDecode(row['course_doc'] as String) as Map<String, dynamic>
+      : row['course_doc'] as Map<String, dynamic>;
+  final holeDocs = row['holes_doc'] is String
+      ? (jsonDecode(row['holes_doc'] as String) as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+      : (row['holes_doc'] as List<dynamic>).cast<Map<String, dynamic>>();
 
-  final ParsedCourse parsed;
-  try {
-    parsed = parseCourse(rawBody);
-  } catch (e) {
-    print('Parse FAILED: $e');
-    return;
-  }
+  final parsed = ParsedCourse(
+    courseId: row['id'] as String,
+    courseDoc: courseDoc,
+    holeDocs: holeDocs,
+  );
 
-  print('=== ${parsed.courseDoc['name']}  '
-      '(${parsed.holeDocs.length} holes) ===\n');
+  print('=== ${row['name']}  (${holeDocs.length} holes) ===\n');
 
   final issues = checkIntegrity(parsed);
   if (issues.isEmpty) {
