@@ -64,7 +64,7 @@ typedef IngestAllResult = ({int total, int succeeded, int failed});
 
 /// Fetch all NZ courses from Overpass, upsert course_list, then parse and
 /// upsert each course. Returns summary counts.
-Future<IngestAllResult> ingestAllNzCourses() async {
+Future<IngestAllResult> ingestAllNzCourses({int? limit}) async {
   final supabase = SupabaseRestClient();
 
   final listQuery = '''
@@ -120,58 +120,68 @@ out center tags;
     }
   }
 
-  await supabase.upsert('course_list', byName.values.toList());
+  final now = DateTime.now().toUtc().toIso8601String();
+  final courseListRows = byName.values
+      .map((c) => {...c, 'updated_at': now})
+      .toList();
+  await supabase.upsert('course_list', courseListRows);
+
+  // Single bbox query for all course details — ways/relations with full geometry
+  // plus all golf features within them. Far fewer Overpass requests than one-per-course.
+  final detailQuery = '''
+[out:json][timeout:300];
+(
+  way["leisure"="golf_course"]($nzBbox);
+  relation["leisure"="golf_course"]($nzBbox);
+)->.courses;
+.courses out geom;
+(
+  node(area.courses)["golf"];
+  way(area.courses)["golf"];
+  relation(area.courses)["golf"];
+);
+out geom;
+''';
+
+  print('Fetching all course details (single bbox query) ...');
+  final fetchStart = DateTime.now();
+  final detailResponse = await http
+      .post(Uri.parse(overpassUrl), body: detailQuery)
+      .timeout(const Duration(seconds: 330));
+  final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
+
+  if (detailResponse.statusCode != 200) {
+    throw Exception('Overpass detail query failed: ${detailResponse.statusCode}');
+  }
+
+  final rawBody = detailResponse.body;
+  final detailData = jsonDecode(rawBody) as Map<String, dynamic>;
+  final elementCount = (detailData['elements'] as List<dynamic>? ?? []).length;
+  print('Overpass: 200 OK, $elementCount elements (${fetchMs}ms)');
+
+  final store = RawJsonStore();
+  await store.save('__all_nz__', rawBody, elementCount);
+  print('Cached raw JSON to ${store.dbPath}');
+
+  print('\nParsing all courses ...');
+  final allParsed = parseAllCourses(rawBody);
+  print('Found ${allParsed.length} parseable courses (way/relation geometry)\n');
+
+  final total = limit != null && limit < allParsed.length ? limit : allParsed.length;
+  if (limit != null) print('(limiting to $total of ${allParsed.length} parsed courses)');
 
   int succeeded = 0;
   int failed = 0;
-  final courseList = byName.values.toList();
-  final total = courseList.length;
-  final store = RawJsonStore();
 
   for (int i = 0; i < total; i++) {
-    final course = courseList[i];
-    final name = course['name'] as String;
-    print('\n[${i + 1}/$total] Fetching: $name ...');
+    final parsed = allParsed[i];
+    final name = parsed.courseDoc['name'] as String;
+    print('[${i + 1}/$total] ${parsed.courseId}  "$name"  ${parsed.holeDocs.length} holes');
     try {
-      final detailQuery = buildDetailQuery(name, nzBbox);
-      final fetchStart = DateTime.now();
-      final detailResponse = await http
-          .post(Uri.parse(overpassUrl), body: detailQuery)
-          .timeout(const Duration(seconds: 60));
-      final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
-
-      if (detailResponse.statusCode != 200) {
-        print('  → Overpass: ${detailResponse.statusCode} (error)');
-        failed++;
-        continue;
-      }
-
-      final rawBody = detailResponse.body;
-      final overpassData = jsonDecode(rawBody) as Map<String, dynamic>;
-      final elementCount =
-          (overpassData['elements'] as List<dynamic>? ?? []).length;
-      print('  → Overpass: 200 OK, $elementCount elements (${fetchMs}ms)');
-
-      await store.save(name, rawBody, elementCount);
-      print('  → Cached raw JSON to ${store.dbPath}');
-
-      print('  → Parsing ...');
-      final ParsedCourse parsed;
-      try {
-        parsed = parseCourse(rawBody);
-      } catch (e) {
-        print('  → Parse FAILED: $e');
-        print('  → Skipping Supabase upsert');
-        failed++;
-        continue;
-      }
-      print(
-          '  → Parsed: ${parsed.courseId}, ${parsed.holeDocs.length} holes');
-
       await supabase.upsert('courses', [
         {
           'id': parsed.courseId,
-          'name': parsed.courseDoc['name'] as String? ?? name,
+          'name': name,
           'course_doc': parsed.courseDoc,
           'holes_doc': parsed.holeDocs,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -180,12 +190,14 @@ out center tags;
       print('  → Upserted to Supabase ✓');
       succeeded++;
     } catch (e) {
-      print('  → ERROR: $e');
+      print('  → Supabase upsert FAILED: $e');
       failed++;
     }
   }
 
-  print('\nDone. courseList=$total  succeeded=$succeeded  failed=$failed');
+
+  await store.close();
+  print('\nDone. parsed=$total  succeeded=$succeeded  failed=$failed');
   return (total: total, succeeded: succeeded, failed: failed);
 }
 

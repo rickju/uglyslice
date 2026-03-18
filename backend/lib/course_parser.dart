@@ -247,10 +247,10 @@ class ParsedCourse {
 }
 
 // ---------------------------------------------------------------------------
-// Main parse function
+// Main parse functions
 // ---------------------------------------------------------------------------
 
-/// Parse raw Overpass JSON and return Firestore-ready document maps.
+/// Parse raw Overpass JSON containing a single course.
 ParsedCourse parseCourse(String json) {
   final overpass = Overpass.fromJson(json);
 
@@ -259,6 +259,34 @@ ParsedCourse parseCourse(String json) {
     orElse: () => throw Exception('No golf course way found in data'),
   );
 
+  return _parseCourseFromWay(overpass, golfCourseWay);
+}
+
+/// Parse all courses found in a multi-course Overpass bbox response.
+/// Skips courses with no polygon geometry (node-only).
+List<ParsedCourse> parseAllCourses(String json) {
+  final overpass = Overpass.fromJson(json);
+
+  final courseWays = overpass.ways
+      .where((w) =>
+          w.tags['leisure'] == 'golf_course' &&
+          (w.polygon != null || w.points.length >= 3))
+      .toList();
+
+  final results = <ParsedCourse>[];
+  for (final courseWay in courseWays) {
+    try {
+      results.add(_parseCourseFromWay(overpass, courseWay));
+    } catch (_) {
+      // Skip individual failures silently — caller can compare counts
+    }
+  }
+  return results;
+}
+
+/// Parse a single course way from a (possibly multi-course) Overpass dataset.
+/// Features are scoped to the course boundary polygon.
+ParsedCourse _parseCourseFromWay(Overpass overpass, Way golfCourseWay) {
   final courseName = golfCourseWay.tags['name'] as String? ?? 'Unknown Golf Course';
   final courseId = 'course_${golfCourseWay.id}';
 
@@ -267,9 +295,25 @@ ParsedCourse parseCourse(String json) {
           ? JtsHelper.fromLatLngPoints(golfCourseWay.points)
           : throw Exception('Golf course way has no valid polygon or points'));
 
+  // Scope features to this course boundary (important for multi-course datasets)
+  bool withinBoundary(Way way) {
+    if (way.polygon != null) return boundary.intersects(way.polygon!);
+    if (way.points.isNotEmpty) {
+      final c = way.points.fold(
+        LatLng(0, 0),
+        (sum, p) => LatLng(sum.latitude + p.latitude, sum.longitude + p.longitude),
+      );
+      final centroid = LatLng(c.latitude / way.points.length, c.longitude / way.points.length);
+      return JtsHelper.pointInPolygon(centroid, boundary);
+    }
+    return false;
+  }
+
+  final scopedWays = overpass.ways.where((w) => w.id != golfCourseWay.id && withinBoundary(w)).toList();
+
   // Extract holes
   final List<Hole> holes = [];
-  final holeWays = overpass.ways.where((way) => way.tags['golf'] == 'hole').toList();
+  final holeWays = scopedWays.where((way) => way.tags['golf'] == 'hole').toList();
 
   for (final holeWay in holeWays) {
     final hole = Hole.fromWay(holeWay, overpass);
@@ -360,29 +404,29 @@ ParsedCourse parseCourse(String json) {
     if (nearest != null) add(nearest);
   }
 
-  for (final way in overpass.ways.where((w) => w.tags['golf'] == 'fairway')) {
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'fairway')) {
     final fw = Fairway.fromWay(way);
     if (fw != null) assignToHole(fw, (h) => h.fairways.add(fw));
   }
-  for (final way in overpass.ways.where((w) => w.tags['golf'] == 'green')) {
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'green')) {
     final gr = Green.fromWay(way);
     if (gr != null) assignToHole(gr, (h) => h.greens.add(gr));
   }
-  for (final way in overpass.ways.where((w) => w.tags['golf'] == 'tee')) {
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'tee')) {
     final tp = TeePlatform.fromWay(way);
     if (tp != null) assignToHole(tp, (h) => h.teePlatforms.add(tp));
   }
 
   // Extract tee info from unique tee colors
   final teeColors = <String>{};
-  for (final way in overpass.ways.where((w) => w.tags['golf'] == 'tee')) {
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'tee')) {
     teeColors.add(way.tags['tee'] as String? ?? 'unknown');
   }
   final teeInfos = teeColors
       .map((color) => TeeInfo(name: color, color: color))
       .toList();
 
-  final cartPaths = overpass.ways
+  final cartPaths = scopedWays
       .where((w) => w.tags['golf'] == 'cartpath' && w.points.length >= 2)
       .map((w) => w.points)
       .toList();

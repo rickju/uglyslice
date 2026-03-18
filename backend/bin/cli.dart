@@ -23,7 +23,9 @@ Future<void> main(List<String> args) async {
       await ingestOneCourse(args[1], bbox: bbox);
 
     case 'ingest-all':
-      await ingestAllNzCourses();
+      final limitArg = args.indexOf('--limit');
+      final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
+      await ingestAllNzCourses(limit: limit);
 
     case 'query-course':
       if (args.length < 2) {

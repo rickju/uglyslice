@@ -1,9 +1,10 @@
 CREATE TABLE course_list (
-  id    BIGINT PRIMARY KEY,   -- OSM element id
-  name  TEXT NOT NULL,
-  type  TEXT NOT NULL,        -- node / way / relation
-  lat   DOUBLE PRECISION NOT NULL,
-  lon   DOUBLE PRECISION NOT NULL
+  id         BIGINT PRIMARY KEY,   -- OSM element id
+  name       TEXT NOT NULL,
+  type       TEXT NOT NULL,        -- node / way / relation
+  lat        DOUBLE PRECISION NOT NULL,
+  lon        DOUBLE PRECISION NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE courses (
