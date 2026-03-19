@@ -63,20 +63,18 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   }
 
   Future<void> _openCourse(CourseListRow course) async {
-    final courseId = 'course_${course.id}';
-
     // Cache hit → navigate immediately
-    final cached = await _courseRepo.fetchCourse(courseId);
+    final cached = await _courseRepo.fetchCourseByName(course.name);
     if (cached != null) {
       if (!mounted) return;
-      _navigate(courseId, course.name);
+      _navigate(cached.id, course.name);
       return;
     }
 
     // Cache miss → sync this course then navigate
     setState(() => _isLoading = true);
     try {
-      await courseSyncService.syncCourse(courseId);
+      final courseId = await courseSyncService.syncCourse(course.name);
       if (!mounted) return;
       _navigate(courseId, course.name);
     } catch (e) {

@@ -19,22 +19,25 @@ class CourseSyncService {
     await _syncCourses();
   }
 
-  /// Fetch a single course by id from Supabase and save it locally.
-  Future<void> syncCourse(String courseId) async {
+  /// Fetch a single course by name from Supabase, save it locally, and return
+  /// its id.
+  Future<String> syncCourse(String courseName) async {
     final rows = await _supabase
         .from('courses')
         .select()
-        .eq('id', courseId)
+        .eq('name', courseName)
         .limit(1);
-    if (rows.isEmpty) throw Exception('Course $courseId not found in Supabase');
+    if (rows.isEmpty) throw Exception('$courseName not found in Supabase');
 
     final r = rows.first;
+    final courseId = r['id'] as String;
     final courseDoc = r['course_doc'] as Map<String, dynamic>;
     final holeDocs = (r['holes_doc'] as List)
         .map((h) => h as Map<String, dynamic>)
         .toList();
     final repo = CourseRepository(_db);
-    await repo.saveCourse(r['id'] as String, courseDoc, holeDocs);
+    await repo.saveCourse(courseId, courseDoc, holeDocs);
+    return courseId;
   }
 
   Future<void> _syncCourseList() async {

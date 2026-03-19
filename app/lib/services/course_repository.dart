@@ -24,6 +24,20 @@ class CourseRepository {
     return Course.fromMap(courseDoc, holeDocs);
   }
 
+  /// Returns the cached course by name, with its id, or null if not cached.
+  Future<({String id, Course course})?> fetchCourseByName(String name) async {
+    final row = await (_db.select(_db.courses)
+          ..where((t) => t.name.equals(name)))
+        .getSingleOrNull();
+    if (row == null) return null;
+
+    final courseDoc =
+        jsonDecode(row.courseDoc) as Map<String, dynamic>;
+    final holeDocs = (jsonDecode(row.holesDoc) as List)
+        .cast<Map<String, dynamic>>();
+    return (id: row.id, course: Course.fromMap(courseDoc, holeDocs));
+  }
+
   /// Upsert course data returned from the backend.
   Future<void> saveCourse(
     String courseId,
