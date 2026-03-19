@@ -71,6 +71,14 @@ Future<void> main(List<String> args) async {
       final bbox = args.length > 2 ? args[2] : null;
       await checkCourse(args[1], bbox: bbox);
 
+    case 'check-cache':
+      if (args.length < 2) {
+        print('Error: check-cache requires a course name.');
+        print('  Usage: dart run bin/cli.dart check-cache "Course Name"');
+        exit(1);
+      }
+      await checkCourseFromCache(args[1]);
+
     default:
       print('Unknown command: ${args[0]}');
       _usage();
@@ -87,6 +95,7 @@ void _usage() {
   print('  ingest-all [--limit N]        Fetch and upsert all NZ courses');
   print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
+  print('  check-cache   <name>          Parse from local cache, print details (no Overpass/Supabase)');
   print('  query-course  <name>          Query Supabase for a stored course and print details');
   print('  check-integrity <name>        Query Supabase and report integrity issues');
 }

@@ -358,138 +358,153 @@ ParsedCourse _parseCourseFromWay(Overpass overpass, Way golfCourseWay) {
     for (final hole in holes) hole.holeNumber: hole,
   };
 
-  void assignToHole(dynamic feature, void Function(Hole) add) {
-    final refStr = feature.tags['ref'] as String?;
-    if (refStr != null) {
-      final refNum = int.tryParse(refStr);
-      if (refNum != null && holeByNumber.containsKey(refNum)) {
-        add(holeByNumber[refNum]!);
-        return;
-      }
-    }
-
-    if (feature.polygon == null) return;
-    final centroid = feature.polygon!.getCentroid();
-    final centroidLatLng = LatLng(centroid.getY(), centroid.getX());
-
-    double pinDist(Hole hole) {
-      final dLat = centroidLatLng.latitude - hole.pin.latitude;
-      final dLon = centroidLatLng.longitude - hole.pin.longitude;
-      return dLat * dLat + dLon * dLon;
-    }
-
-    Hole? nearest;
-    double minDist = double.infinity;
-    for (final hole in holes) {
-      final holePoly = holePolygons[hole.holeNumber];
-      if (holePoly == null) continue;
-      if (!JtsHelper.pointInPolygon(centroidLatLng, holePoly)) continue;
-      final d = pinDist(hole);
-      if (d < minDist) {
-        minDist = d;
-        nearest = hole;
-      }
-    }
-    if (nearest != null) {
-      add(nearest);
-      return;
-    }
-
-    // Fallback: nearest hole by pin distance
-    minDist = double.infinity;
-    for (final hole in holes) {
-      final d = pinDist(hole);
-      if (d < minDist) {
-        minDist = d;
-        nearest = hole;
-      }
-    }
-    if (nearest != null) add(nearest);
-  }
-
-  for (final way in scopedWays.where((w) => w.tags['golf'] == 'fairway')) {
-    final fw = Fairway.fromWay(way);
-    if (fw != null) assignToHole(fw, (h) => h.fairways.add(fw));
-  }
-  for (final way in scopedWays.where((w) => w.tags['golf'] == 'green')) {
-    final gr = Green.fromWay(way);
-    if (gr != null) assignToHole(gr, (h) => h.greens.add(gr));
-  }
-  for (final way in scopedWays.where((w) => w.tags['golf'] == 'tee')) {
-    final tp = TeePlatform.fromWay(way);
-    if (tp != null) assignToHole(tp, (h) => h.teePlatforms.add(tp));
-  }
-
   double _sq(LatLng a, LatLng b) {
     final dLat = a.latitude - b.latitude;
     final dLon = a.longitude - b.longitude;
     return dLat * dLat + dLon * dLon;
   }
 
-  LatLng? _greenCentroid(Hole hole) {
-    if (hole.greens.isEmpty) return null;
-    final pts = hole.greens.first.points;
-    if (pts.isEmpty) return null;
+  LatLng _polyCentroid(List<LatLng> pts) {
     final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
     final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
     return LatLng(sumLat / pts.length, sumLon / pts.length);
   }
 
-  // Update pin to green centroid first — needed for accurate reversal check
-  // on holes without tee platforms (where the fallback pin is way.points.last).
-  for (final hole in holes) {
-    final gc = _greenCentroid(hole);
-    if (gc != null) hole.pin = gc;
+  // ── Step 1: assign greens ──────────────────────────────────────────────────
+  // Use hole polygon for containment; fallback to nearest routing.last
+  // (the tentative pin end before orientation is confirmed).
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'green')) {
+    final gr = Green.fromWay(way);
+    if (gr == null) continue;
+
+    final refStr = way.tags['ref'] as String?;
+    final refNum = refStr != null ? int.tryParse(refStr) : null;
+    if (refNum != null && holeByNumber.containsKey(refNum)) {
+      holeByNumber[refNum]!.greens.add(gr);
+      continue;
+    }
+
+    if (gr.polygon == null) continue;
+    final gc = gr.polygon!.getCentroid();
+    final gcLatLng = LatLng(gc.getY(), gc.getX());
+
+    // Try polygon containment first
+    Hole? best;
+    double minD = double.infinity;
+    for (final hole in holes) {
+      final poly = holePolygons[hole.holeNumber];
+      if (poly == null || !JtsHelper.pointInPolygon(gcLatLng, poly)) continue;
+      final d = _sq(gcLatLng, hole.routingLine.last);
+      if (d < minD) { minD = d; best = hole; }
+    }
+    if (best != null) { best.greens.add(gr); continue; }
+
+    // Fallback: nearest routing.last
+    for (final hole in holes) {
+      final d = _sq(gcLatLng, hole.routingLine.last);
+      if (d < minD) { minD = d; best = hole; }
+    }
+    best?.greens.add(gr);
   }
 
-  // Orient routing lines tee→pin. The last point should be closest to pin.
-  // Priority:
-  //   1. Green assigned → pin is green centroid → use it as anchor
-  //   2. No green but tee platform → use tee centroid (first should be near tee)
-  //   3. Neither → find nearest green from all scoped ways within 150 m
+  // ── Step 2: update pin to green centroid ──────────────────────────────────
+  for (final hole in holes) {
+    if (hole.greens.isEmpty) continue;
+    final pts = hole.greens.first.points;
+    if (pts.isNotEmpty) hole.pin = _polyCentroid(pts);
+  }
+
+  // ── Step 3: orient routing tee→pin ────────────────────────────────────────
+  // Anchor priority: green centroid (reliable) → nearest scoped green within
+  // 150 m. Result: routing.first = tee end, routing.last = pin end.
   for (final hole in holes) {
     if (hole.routingLine.length < 2) continue;
 
+    LatLng anchor;
     if (hole.greens.isNotEmpty) {
-      // Green assigned; pin = green centroid. Reverse if first is closer to pin.
-      if (_sq(hole.routingLine.first, hole.pin) <
-          _sq(hole.routingLine.last, hole.pin)) {
-        hole.routingLine = hole.routingLine.reversed.toList();
-      }
-    } else if (hole.teePlatforms.isNotEmpty) {
-      // No green but tee available. Reverse if last is closer to tee (tee
-      // should be the start).
-      final pts = hole.teePlatforms.first.points;
-      if (pts.isEmpty) continue;
-      final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
-      final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
-      final tc = LatLng(sumLat / pts.length, sumLon / pts.length);
-      if (_sq(hole.routingLine.last, tc) < _sq(hole.routingLine.first, tc)) {
-        hole.routingLine = hole.routingLine.reversed.toList();
-      }
+      anchor = hole.pin; // already green centroid from step 2
     } else {
-      // No green, no tee — find nearest green from scoped ways.
-      LatLng? bestCentroid;
+      // Find nearest green centroid to either endpoint
+      LatLng? best;
       double minSq = double.infinity;
       for (final gw in scopedWays.where((w) => w.tags['golf'] == 'green')) {
         if (gw.points.isEmpty) continue;
-        final sumLat = gw.points.fold(0.0, (s, p) => s + p.latitude);
-        final sumLon = gw.points.fold(0.0, (s, p) => s + p.longitude);
-        final gc = LatLng(sumLat / gw.points.length, sumLon / gw.points.length);
+        final gc = _polyCentroid(gw.points);
         for (final ep in [hole.routingLine.first, hole.routingLine.last]) {
           final d = _sq(ep, gc);
-          if (d < minSq) { minSq = d; bestCentroid = gc; }
+          if (d < minSq) { minSq = d; best = gc; }
         }
       }
-      // Only use if within ~150 m of an endpoint
-      if (bestCentroid != null && minSq < (150.0 / 111000) * (150.0 / 111000)) {
-        if (_sq(hole.routingLine.first, bestCentroid) <
-            _sq(hole.routingLine.last, bestCentroid)) {
-          hole.routingLine = hole.routingLine.reversed.toList();
-        }
-        hole.pin = bestCentroid;
-      }
+      const thresh = (150.0 / 111000) * (150.0 / 111000);
+      if (best == null || minSq > thresh) continue;
+      anchor = best;
+      hole.pin = anchor;
     }
+
+    if (_sq(hole.routingLine.first, anchor) < _sq(hole.routingLine.last, anchor)) {
+      hole.routingLine = hole.routingLine.reversed.toList();
+    }
+  }
+
+  // ── Step 4: assign tee platforms ──────────────────────────────────────────
+  // routing.first is now the reliable tee end. Assign each tee platform to
+  // the hole whose routing.first is nearest (within 200 m).
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'tee')) {
+    final tp = TeePlatform.fromWay(way);
+    if (tp == null || tp.points.isEmpty) continue;
+
+    final refStr = way.tags['ref'] as String?;
+    final refNum = refStr != null ? int.tryParse(refStr) : null;
+    if (refNum != null && holeByNumber.containsKey(refNum)) {
+      holeByNumber[refNum]!.teePlatforms.add(tp);
+      continue;
+    }
+
+    final tc = _polyCentroid(tp.points);
+    Hole? best;
+    double minD = double.infinity;
+    for (final hole in holes) {
+      if (hole.routingLine.isEmpty) continue;
+      final d = _sq(tc, hole.routingLine.first);
+      if (d < minD) { minD = d; best = hole; }
+    }
+    const thresh = (200.0 / 111000) * (200.0 / 111000);
+    if (best != null && minD < thresh) best.teePlatforms.add(tp);
+  }
+
+  // ── Step 5: assign fairways ───────────────────────────────────────────────
+  // Fairways use polygon containment; fallback nearest pin.
+  for (final way in scopedWays.where((w) => w.tags['golf'] == 'fairway')) {
+    final fw = Fairway.fromWay(way);
+    if (fw == null) continue;
+
+    final refStr = way.tags['ref'] as String?;
+    final refNum = refStr != null ? int.tryParse(refStr) : null;
+    if (refNum != null && holeByNumber.containsKey(refNum)) {
+      holeByNumber[refNum]!.fairways.add(fw);
+      continue;
+    }
+
+    if (fw.polygon == null) continue;
+    final fc = fw.polygon!.getCentroid();
+    final fcLatLng = LatLng(fc.getY(), fc.getX());
+
+    Hole? best;
+    double minD = double.infinity;
+    for (final hole in holes) {
+      final poly = holePolygons[hole.holeNumber];
+      if (poly == null || !JtsHelper.pointInPolygon(fcLatLng, poly)) continue;
+      final d = _sq(fcLatLng, hole.pin);
+      if (d < minD) { minD = d; best = hole; }
+    }
+    if (best != null) { best.fairways.add(fw); continue; }
+
+    // Fallback: nearest pin
+    for (final hole in holes) {
+      final d = _sq(fcLatLng, hole.pin);
+      if (d < minD) { minD = d; best = hole; }
+    }
+    best?.fairways.add(fw);
   }
 
   // Extract tee info from unique tee colors

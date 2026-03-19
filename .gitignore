@@ -5,6 +5,14 @@ temp/
 node_modules/
 package-lock.json
 
+app/.idea/
+app/.metadata
+supabase/.temp/
+
+app/ugly_slice.iml
+app/lib/config.dart
+
+app/linux/
 
 # Miscellaneous
 *.class

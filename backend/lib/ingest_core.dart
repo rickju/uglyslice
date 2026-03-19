@@ -482,6 +482,45 @@ Future<void> checkCourse(String courseName, {String? bbox}) async {
   }
 }
 
+/// Parse a course from the local SQLite cache and print hole details.
+/// No Overpass or Supabase required — useful for verifying parser output.
+Future<void> checkCourseFromCache(String courseName) async {
+  final store = RawJsonStore();
+  final rawBody = await store.load(courseName);
+  await store.close();
+
+  if (rawBody == null) {
+    print('No cached JSON for "$courseName". Run ingest-course first.');
+    return;
+  }
+
+  print('Parsing from cache ...\n');
+  final ParsedCourse parsed;
+  try {
+    parsed = parseCourse(rawBody);
+  } catch (e) {
+    print('Parse FAILED: $e');
+    return;
+  }
+
+  print('=== ${parsed.courseDoc['name']} ===');
+  print('ID    : ${parsed.courseId}');
+  print('Holes : ${parsed.holeDocs.length}');
+  print('');
+
+  for (final h in parsed.holeDocs) {
+    final num = (h['holeNumber'] as int).toString().padLeft(2);
+    final par = h['par'];
+    final fairways = (h['fairways'] as List).length;
+    final greens = (h['greens'] as List).length;
+    final tees = (h['teePlatforms'] as List).length;
+    final routingPts = (h['routingLine'] as List).length;
+    print('  Hole $num  par $par'
+        '  fairways=$fairways  greens=$greens'
+        '  tee_platforms=$tees  routing_pts=$routingPts');
+  }
+}
+
 String buildDetailQuery(String courseName, String bbox) => '''
 [out:json][timeout:25];
 (
