@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'play_page.dart';
-import 'scorecard_page.dart';
+import 'rounds_list_page.dart';
 import 'settings_page.dart';
-import 'models/scorecard.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -13,20 +12,12 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  final Scorecard _scorecard = Scorecard();
-
-  Widget _buildPlayPage() {
-    return PlayPage();
-  }
 
   @override
   Widget build(BuildContext context) {
     final List<Widget> widgetOptions = <Widget>[
-      _buildPlayPage(),
-      // TODO: Scorecard page needs to be re-thought with the new navigation flow
-      Scaffold(
-          appBar: AppBar(title: const Text('Scorecard')),
-          body: const Center(child: Text('Please start a round from the Play tab.'))),
+      PlayPage(),
+      const RoundsListPage(),
       const SettingsPage(),
     ];
 
