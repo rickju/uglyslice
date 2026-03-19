@@ -509,46 +509,32 @@ class _RoundPageState extends State<RoundPage> {
         ? const Distance().bearing(routing.first, routing[1])
         : 0.0;
 
-    LatLng? centroid(List<LatLng> pts) {
-      if (pts.isEmpty) return null;
-      return LatLng(
-        pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length,
-        pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length,
-      );
-    }
-
-    final List<LatLng> teePositions = [
-      ...hole.teeBoxes.map((t) => t.position),
-      ...hole.teePlatforms
-          .map((tp) => centroid(tp.points))
-          .whereType<LatLng>(),
-    ];
-
-    if (teePositions.isEmpty) {
-      _mapController.move(pin, 16);
-      _mapController.rotate(-bearing);
-      return;
-    }
-
-    final List<LatLng> points = [pin, ...teePositions];
-
-    // Use routing line length for padding — more reliable than teePositions.first.
+    // Hole length drives zoom — fitCamera + rotation is unreliable for large
+    // bearing angles because the rotated viewport clips the axis-aligned bounds.
     final double meters = routing.length >= 2
         ? const Distance().as(LengthUnit.Meter, routing.first, routing.last)
-        : const Distance().as(LengthUnit.Meter, pin, teePositions.first);
-    // Scale padding with hole length: short holes need less padding so they
-    // zoom in tighter; long holes need more to show the full shape.
-    final double padding = meters < 150 ? 40.0 : meters < 350 ? 60.0 : 80.0;
+        : 300.0;
 
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints(points),
-        padding: EdgeInsets.all(padding),
-        maxZoom: 19.0,
-        minZoom: 14.0,
-      ),
-    );
-    // Rotate after fitCamera so it isn't overridden by the bounds calculation.
-    _mapController.rotate(-bearing);
+    final double zoom = meters < 120
+        ? 18.5
+        : meters < 200
+            ? 18.0
+            : meters < 300
+                ? 17.5
+                : meters < 420
+                    ? 17.0
+                    : meters < 520
+                        ? 16.5
+                        : 16.0;
+
+    // Centre on routing midpoint so both tee and pin are equidistant from centre.
+    final mid = routing.length >= 2
+        ? LatLng(
+            (routing.first.latitude + routing.last.latitude) / 2,
+            (routing.first.longitude + routing.last.longitude) / 2,
+          )
+        : pin;
+
+    _mapController.moveAndRotate(mid, zoom, -bearing);
   }
 }
