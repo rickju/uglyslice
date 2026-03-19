@@ -240,7 +240,7 @@ class _RoundPageState extends State<RoundPage> {
                   // --- play line for current hole ---
                   if (_round!.course.holes.isNotEmpty)
                     Polyline(
-                      points: _round!.course.holes[_currentHoleIndex].playLine(),
+                      points: _round!.course.holes[_currentHoleIndex].routingLine,
                       color: Colors.white.withValues(alpha: 0.7),
                       strokeWidth: 2,
                       pattern: StrokePattern.dashed(segments: const [12, 6]),
