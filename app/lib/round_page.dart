@@ -348,13 +348,13 @@ class _RoundPageState extends State<RoundPage> {
                       // --- button: Previous Hole ---
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () {
-                        setState(() {
-                          if (_currentHoleIndex > 0) {
+                        if (_currentHoleIndex > 0) {
+                          setState(() {
                             _currentHoleIndex--;
                             _selectedTee = null;
-                            _fitMapToHoleView(_currentHoleIndex);
-                          }
-                        });
+                          });
+                          _fitMapToHoleView(_currentHoleIndex);
+                        }
                       },
                     ),
                     Text(
@@ -372,14 +372,14 @@ class _RoundPageState extends State<RoundPage> {
                         color: Colors.white,
                       ),
                       onPressed: () {
-                        setState(() {
-                          if (_currentHoleIndex <
-                              _round!.course.holes.length - 1) {
+                        if (_currentHoleIndex <
+                            _round!.course.holes.length - 1) {
+                          setState(() {
                             _currentHoleIndex++;
                             _selectedTee = null;
-                            _fitMapToHoleView(_currentHoleIndex);
-                          }
-                        });
+                          });
+                          _fitMapToHoleView(_currentHoleIndex);
+                        }
                       },
                     ),
                   ],
@@ -502,6 +502,12 @@ class _RoundPageState extends State<RoundPage> {
 
     final hole = _round!.course.holes[holeIndex];
     final pin = hole.pin;
+    final routing = hole.routingLine;
+
+    // Use the OSM routing line for bearing — it's oriented tee→pin by the parser.
+    final double bearing = routing.length >= 2
+        ? const Distance().bearing(routing.first, routing[1])
+        : 0.0;
 
     LatLng? centroid(List<LatLng> pts) {
       if (pts.isEmpty) return null;
@@ -518,31 +524,31 @@ class _RoundPageState extends State<RoundPage> {
           .whereType<LatLng>(),
     ];
 
-    final playLine = hole.playLine();
-    final double bearing = playLine.length >= 2
-        ? const Distance().bearing(playLine.first, playLine[1])
-        : 0.0;
-
-    _mapController.rotate(-bearing);
-
     if (teePositions.isEmpty) {
       _mapController.move(pin, 16);
+      _mapController.rotate(-bearing);
       return;
     }
 
     final List<LatLng> points = [pin, ...teePositions];
-    final double meters = const Distance().as(
-      LengthUnit.Meter, pin, teePositions.first,
-    );
-    final double padding = meters < 150 ? 100.0 : 60.0;
+
+    // Use routing line length for padding — more reliable than teePositions.first.
+    final double meters = routing.length >= 2
+        ? const Distance().as(LengthUnit.Meter, routing.first, routing.last)
+        : const Distance().as(LengthUnit.Meter, pin, teePositions.first);
+    // Scale padding with hole length: short holes need less padding so they
+    // zoom in tighter; long holes need more to show the full shape.
+    final double padding = meters < 150 ? 40.0 : meters < 350 ? 60.0 : 80.0;
 
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: LatLngBounds.fromPoints(points),
         padding: EdgeInsets.all(padding),
-        maxZoom: 17.0,
+        maxZoom: 19.0,
         minZoom: 14.0,
       ),
     );
+    // Rotate after fitCamera so it isn't overridden by the bounds calculation.
+    _mapController.rotate(-bearing);
   }
 }
