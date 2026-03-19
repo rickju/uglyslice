@@ -4,7 +4,9 @@
 ///   dart run bin/cli.dart ingest-course "Karori Golf Club"
 ///   dart run bin/cli.dart ingest-course          ← interactive picker
 ///   dart run bin/cli.dart ingest-all
+import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:ugly_slice_backend/ingest_core.dart';
 import 'package:ugly_slice_backend/raw_json_store.dart';
 import 'package:ugly_slice_backend/supabase_client.dart';
@@ -82,37 +84,64 @@ Future<void> main(List<String> args) async {
   }
 }
 
-/// Interactive fuzzy picker. Reads course names from the local cache, lets
-/// the user type to filter, and arrow-keys to select. Returns the chosen name
-/// or null if cancelled / no terminal.
+// ── Picker ────────────────────────────────────────────────────────────────────
+
+typedef _CourseEntry = ({String name, double lat, double lon});
+
+/// Interactive fuzzy picker with recently-used and nearby priority.
+/// Omit the course name on any command to invoke it.
 Future<String?> _pickCourseName() async {
   if (!stdin.hasTerminal) return null;
 
-  // Prefer Supabase course_list (full list); fall back to local SQLite cache.
-  List<String> allNames = [];
+  // Load recently used names (most recent first).
+  final recent = _loadRecent();
+  final recentSet = recent.toSet();
+
+  // Load all courses from Supabase (with lat/lon); fall back to local cache.
+  List<_CourseEntry> allCourses = [];
+  String sourceLabel = '';
   try {
     final supabase = SupabaseRestClient();
-    final rows = await supabase.select('course_list', columns: 'name');
-    allNames = rows
-        .map((r) => r['name'] as String? ?? '')
-        .where((n) => n.isNotEmpty)
-        .toList()
-      ..sort();
-    stdout.write('(${allNames.length} courses from Supabase)\n');
+    final rows = await supabase.select('course_list', columns: 'name,lat,lon');
+    allCourses = rows
+        .where((r) => (r['name'] as String?)?.isNotEmpty == true)
+        .map((r) => (
+              name: r['name'] as String,
+              lat: (r['lat'] as num).toDouble(),
+              lon: (r['lon'] as num).toDouble(),
+            ))
+        .toList();
+    sourceLabel = '${allCourses.length} courses';
   } catch (_) {
     final store = RawJsonStore();
-    allNames = await store.listNames();
+    final names = await store.listNames();
     await store.close();
-    if (allNames.isNotEmpty) {
-      stdout.write('(${allNames.length} courses from local cache)\n');
-    }
+    allCourses = names.map((n) => (name: n, lat: 0.0, lon: 0.0)).toList();
+    sourceLabel = '${allCourses.length} cached';
   }
 
-  if (allNames.isEmpty) {
+  if (allCourses.isEmpty) {
     print('No courses found. Run ingest-all or set SUPABASE env vars.');
     return null;
   }
 
+  // Get approximate location via IP for nearby sort (best-effort, 3s timeout).
+  final loc = await _approxLocation();
+
+  // Build priority list: recent first, then nearby (or alpha if no location).
+  final recentEntries =
+      recent.where((r) => allCourses.any((c) => c.name == r)).toList();
+  var others =
+      allCourses.where((c) => !recentSet.contains(c.name)).toList();
+  if (loc != null) {
+    others.sort((a, b) => _distSq(loc.$1, loc.$2, a.lat, a.lon)
+        .compareTo(_distSq(loc.$1, loc.$2, b.lat, b.lon)));
+  } else {
+    others.sort((a, b) => a.name.compareTo(b.name));
+  }
+  final prioritized = [...recentEntries, ...others.map((c) => c.name)];
+
+  // ── UI ────────────────────────────────────────────────────────────────────
   stdin.echoMode = false;
   stdin.lineMode = false;
 
@@ -121,77 +150,74 @@ Future<String?> _pickCourseName() async {
   var printedLines = 0;
   const maxShow = 10;
 
-  List<String> _filter(String q) {
-    if (q.isEmpty) return allNames.take(maxShow).toList();
+  List<String> filter(String q) {
+    if (q.isEmpty) return prioritized.take(maxShow).toList();
     final lower = q.toLowerCase();
-    return allNames
+    return prioritized
         .where((n) => n.toLowerCase().contains(lower))
         .take(maxShow)
         .toList();
   }
 
   void clearPrinted() {
-    for (var i = 0; i < printedLines; i++) {
-      stdout.write('\x1b[1A\x1b[2K'); // move up + clear line
-    }
+    for (var i = 0; i < printedLines; i++) stdout.write('\x1b[1A\x1b[2K');
     printedLines = 0;
   }
 
   void render(List<String> matches) {
     clearPrinted();
-    stdout.write('Search: $query\n');
-    for (var i = 0; i < matches.length; i++) {
-      if (i == selectedIdx) {
-        stdout.write('\x1b[32m> ${matches[i]}\x1b[0m\n'); // green highlight
-      } else {
-        stdout.write('  ${matches[i]}\n');
-      }
-    }
+    final hint = loc != null ? 'nearby' : 'alpha';
+    stdout.write('Search: $query  \x1b[2m[$sourceLabel · $hint]\x1b[0m\n');
+    var lines = 1;
     if (matches.isEmpty) {
-      stdout.write('  (no matches)\n');
-      printedLines = 2;
-    } else {
-      printedLines = 1 + matches.length;
+      stdout.write('  \x1b[2m(no matches)\x1b[0m\n');
+      lines++;
     }
+    for (var i = 0; i < matches.length; i++) {
+      // ★ for recently-used when not filtering
+      final star =
+          (query.isEmpty && recentSet.contains(matches[i])) ? '★ ' : '  ';
+      if (i == selectedIdx) {
+        stdout.write('\x1b[32m>$star${matches[i]}\x1b[0m\n');
+      } else {
+        stdout.write(' $star${matches[i]}\n');
+      }
+      lines++;
+    }
+    printedLines = lines;
   }
 
-  var matches = _filter(query);
+  var matches = filter(query);
   render(matches);
 
   String? result;
-
   while (true) {
     final byte = stdin.readByteSync();
     if (byte == -1) break;
 
     if (byte == 0x1b) {
-      // Escape sequence — read two more bytes for arrow keys.
       final b2 = stdin.readByteSync();
       if (b2 == 0x5b) {
         final b3 = stdin.readByteSync();
-        if (b3 == 0x41 && selectedIdx > 0) selectedIdx--;          // ↑
-        if (b3 == 0x42 && selectedIdx < matches.length - 1) selectedIdx++; // ↓
+        if (b3 == 0x41 && selectedIdx > 0) selectedIdx--;
+        if (b3 == 0x42 && selectedIdx < matches.length - 1) selectedIdx++;
       }
     } else if (byte == 0x0d || byte == 0x0a) {
-      // Enter — confirm selection.
       if (matches.isNotEmpty) result = matches[selectedIdx];
       break;
     } else if (byte == 0x7f || byte == 0x08) {
-      // Backspace.
       if (query.isNotEmpty) {
         query = query.substring(0, query.length - 1);
         selectedIdx = 0;
       }
     } else if (byte == 0x03) {
-      // Ctrl+C — cancel.
       break;
     } else if (byte >= 0x20 && byte < 0x7f) {
-      // Printable ASCII.
       query += String.fromCharCode(byte);
       selectedIdx = 0;
     }
 
-    matches = _filter(query);
+    matches = filter(query);
     if (selectedIdx >= matches.length) {
       selectedIdx = matches.isEmpty ? 0 : matches.length - 1;
     }
@@ -203,10 +229,56 @@ Future<String?> _pickCourseName() async {
   clearPrinted();
 
   if (result != null) {
+    _saveRecent(result);
     print('Selected: $result');
   }
   return result;
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// IP-based approximate location. Returns (lat, lon) or null on failure.
+Future<(double, double)?> _approxLocation() async {
+  try {
+    final resp = await http
+        .get(Uri.parse('https://ipinfo.io/json'))
+        .timeout(const Duration(seconds: 3));
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    final loc = data['loc'] as String?;
+    if (loc == null) return null;
+    final parts = loc.split(',');
+    return (double.parse(parts[0]), double.parse(parts[1]));
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Squared degree distance (cheap proxy for sorting — no trig needed).
+double _distSq(double lat1, double lon1, double lat2, double lon2) {
+  final dlat = lat2 - lat1;
+  final dlon = (lon2 - lon1) * 0.75; // rough cos(lat) correction
+  return dlat * dlat + dlon * dlon;
+}
+
+File get _recentFile =>
+    File('${Platform.environment['HOME'] ?? '/tmp'}/.ugly_slice_recent.json');
+
+List<String> _loadRecent() {
+  try {
+    return (jsonDecode(_recentFile.readAsStringSync()) as List).cast<String>();
+  } catch (_) {
+    return [];
+  }
+}
+
+void _saveRecent(String name) {
+  var recent = _loadRecent()..remove(name);
+  recent.insert(0, name);
+  if (recent.length > 20) recent = recent.sublist(0, 20);
+  _recentFile.writeAsStringSync(jsonEncode(recent));
+}
+
+// ── Usage ─────────────────────────────────────────────────────────────────────
 
 void _usage() {
   print('Usage: dart run bin/cli.dart <command> [args]');
@@ -223,5 +295,5 @@ void _usage() {
   print('  query-course  [name]          Query Supabase for a stored course and print details');
   print('  check-integrity [name]        Query Supabase and report integrity issues');
   print('');
-  print('Tip: omit [name] to get an interactive picker (type to filter, ↑↓ to select).');
+  print('Tip: omit [name] for an interactive picker (★ recent · sorted nearby · type to filter).');
 }
