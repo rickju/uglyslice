@@ -59,6 +59,21 @@ class RawJsonStore {
     return _db!;
   }
 
+  /// Returns the most recent cached raw JSON for [name], or null if not found.
+  Future<String?> load(String name) async {
+    final db = await _open();
+    final rows = await db.query(
+      'overpass_cache',
+      columns: ['raw_json'],
+      where: 'name = ?',
+      whereArgs: [name],
+      orderBy: 'fetched_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['raw_json'] as String;
+  }
+
   Future<void> save(String name, String rawJson, int elementCount) async {
     final db = await _open();
     await db.insert('overpass_cache', {

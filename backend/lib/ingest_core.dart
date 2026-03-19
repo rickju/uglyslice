@@ -60,6 +60,43 @@ Future<String> ingestOneCourse(String courseName, {String? bbox}) async {
   return parsed.courseId;
 }
 
+/// Re-parse a course from the local SQLite cache and upsert to Supabase.
+/// No Overpass request — useful when Overpass is rate-limiting.
+Future<String> reparseCourse(String courseName) async {
+  final store = RawJsonStore();
+  final rawBody = await store.load(courseName);
+  await store.close();
+
+  if (rawBody == null) {
+    throw Exception(
+        'No cached JSON for "$courseName". Run ingest-course first.');
+  }
+
+  print('  → Parsing from cache ...');
+  final ParsedCourse parsed;
+  try {
+    parsed = parseCourse(rawBody);
+  } catch (e) {
+    print('  → Parse FAILED: $e');
+    throw Exception('Parse failed: $e');
+  }
+  print('  → Parsed: ${parsed.courseId}, ${parsed.holeDocs.length} holes');
+
+  final supabase = SupabaseRestClient();
+  await supabase.upsert('courses', [
+    {
+      'id': parsed.courseId,
+      'name': parsed.courseDoc['name'] as String? ?? courseName,
+      'course_doc': parsed.courseDoc,
+      'holes_doc': parsed.holeDocs,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }
+  ]);
+  print('  → Upserted to Supabase ✓');
+
+  return parsed.courseId;
+}
+
 typedef IngestAllResult = ({int total, int succeeded, int failed});
 
 /// Shared ingest logic: runs list+detail Overpass queries, upserts course_list,

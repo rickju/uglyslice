@@ -145,8 +145,8 @@ class Hole {
   final int holeNumber;
   final int par;
   final int handicapIndex;
-  final LatLng pin;
-  final List<LatLng> routingLine;
+  LatLng pin;
+  List<LatLng> routingLine;
   final List<TeeBox> teeBoxes;
   final List<TeePlatform> teePlatforms;
   final List<Fairway> fairways;
@@ -418,6 +418,38 @@ ParsedCourse _parseCourseFromWay(Overpass overpass, Way golfCourseWay) {
   for (final way in scopedWays.where((w) => w.tags['golf'] == 'tee')) {
     final tp = TeePlatform.fromWay(way);
     if (tp != null) assignToHole(tp, (h) => h.teePlatforms.add(tp));
+  }
+
+  // Orient routing lines tee→pin: if the last point is closer to the tee
+  // centroid than the first, the way was drawn pin→tee and needs reversing.
+  for (final hole in holes) {
+    if (hole.teePlatforms.isEmpty || hole.routingLine.length < 2) continue;
+    final pts = hole.teePlatforms.first.points;
+    if (pts.isEmpty) continue;
+    final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
+    final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
+    final tc = LatLng(sumLat / pts.length, sumLon / pts.length);
+
+    double sq(LatLng a, LatLng b) {
+      final dLat = a.latitude - b.latitude;
+      final dLon = a.longitude - b.longitude;
+      return dLat * dLat + dLon * dLon;
+    }
+
+    if (sq(hole.routingLine.last, tc) < sq(hole.routingLine.first, tc)) {
+      hole.routingLine = hole.routingLine.reversed.toList();
+    }
+  }
+
+  // Update pin to green centroid where available — more reliable than the
+  // fallback way endpoint (which may be at the wrong end after reversal).
+  for (final hole in holes) {
+    if (hole.greens.isEmpty) continue;
+    final pts = hole.greens.first.points;
+    if (pts.isEmpty) continue;
+    final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
+    final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
+    hole.pin = LatLng(sumLat / pts.length, sumLon / pts.length);
   }
 
   // Extract tee info from unique tee colors

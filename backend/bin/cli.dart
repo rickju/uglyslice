@@ -22,6 +22,14 @@ Future<void> main(List<String> args) async {
       final bbox = args.length > 2 ? args[2] : null;
       await ingestOneCourse(args[1], bbox: bbox);
 
+    case 'reparse-course':
+      if (args.length < 2) {
+        print('Error: reparse-course requires a course name.');
+        print('  Usage: dart run bin/cli.dart reparse-course "Course Name"');
+        exit(1);
+      }
+      await reparseCourse(args[1]);
+
     case 'ingest-all':
       final limitArg = args.indexOf('--limit');
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
@@ -75,6 +83,7 @@ void _usage() {
   print('');
   print('Commands:');
   print('  ingest-course <name> [bbox]  Fetch, parse, and upsert a single course');
+  print('  reparse-course <name>        Re-parse from local cache, upsert (no Overpass)');
   print('  ingest-all [--limit N]        Fetch and upsert all NZ courses');
   print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
