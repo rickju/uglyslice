@@ -63,7 +63,7 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   }
 
   Future<void> _openCourse(CourseListRow course) async {
-    final courseId = 'osm_${course.id}';
+    final courseId = 'course_${course.id}';
 
     // Cache hit → navigate immediately
     final cached = await _courseRepo.fetchCourse(courseId);
@@ -73,17 +73,19 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
       return;
     }
 
-    // Cache miss → course not yet synced
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${course.name} not yet synced.'),
-        action: SnackBarAction(
-          label: 'Sync now',
-          onPressed: _sync,
-        ),
-      ),
-    );
+    // Cache miss → sync this course then navigate
+    setState(() => _isLoading = true);
+    try {
+      await courseSyncService.syncCourse(courseId);
+      if (!mounted) return;
+      _navigate(courseId, course.name);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Failed to load ${course.name}: $e';
+      });
+    }
   }
 
   void _navigate(String courseId, String courseName) {
