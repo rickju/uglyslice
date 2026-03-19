@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import 'database/app_database.dart';
 import 'main.dart' show db, courseSyncService;
@@ -22,12 +23,34 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   bool _isLoading = true;
   String? _error;
 
+  double? _lat;
+  double? _lon;
+
   @override
   void initState() {
     super.initState();
     _repo = CourseListRepository(db);
     _courseRepo = CourseRepository(db);
-    _loadAll();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await RecentCourses.load();
+    await _fetchLocation();
+    await _loadAll();
+  }
+
+  Future<void> _fetchLocation() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low,
+      ).timeout(const Duration(seconds: 5));
+      _lat = pos.latitude;
+      _lon = pos.longitude;
+    } catch (_) {}
   }
 
   Future<void> _sync() async {
@@ -47,22 +70,23 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   }
 
   Future<void> _loadAll() async {
-    final courses = await _repo.listCourses();
+    final courses = await _repo.listCourses(lat: _lat, lon: _lon);
     setState(() {
       _results = courses;
       _isLoading = false;
     });
   }
 
-
   Future<void> _search(String query) async {
     final courses = query.isEmpty
-        ? await _repo.listCourses()
-        : await _repo.search(query);
+        ? await _repo.listCourses(lat: _lat, lon: _lon)
+        : await _repo.search(query, lat: _lat, lon: _lon);
     setState(() => _results = courses);
   }
 
   Future<void> _openCourse(CourseListRow course) async {
+    await RecentCourses.add(course.name);
+
     // Cache hit → navigate immediately
     final cached = await _courseRepo.fetchCourseByName(course.name);
     if (cached != null) {
@@ -101,6 +125,9 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
     super.dispose();
   }
 
+  bool _isRecent(CourseListRow course) =>
+      RecentCourses.cached.contains(course.name);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -128,8 +155,7 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
             ),
           ),
           if (_isLoading)
-            const Expanded(
-                child: Center(child: CircularProgressIndicator()))
+            const Expanded(child: Center(child: CircularProgressIndicator()))
           else if (_error != null)
             Expanded(
               child: Center(
@@ -150,7 +176,12 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
                 itemCount: _results.length,
                 itemBuilder: (context, i) {
                   final course = _results[i];
+                  final recent = _isRecent(course);
                   return ListTile(
+                    leading: recent
+                        ? const Icon(Icons.history, size: 18,
+                            color: Colors.amber)
+                        : null,
                     title: Text(course.name),
                     onTap: () => _openCourse(course),
                   );
