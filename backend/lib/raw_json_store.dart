@@ -84,6 +84,30 @@ class RawJsonStore {
     });
   }
 
+  // System cache keys like __all_nz__ start with '__'. Filter them out.
+  static const _systemKeyFilter = "name NOT LIKE '\\_%' ESCAPE '\\'";
+
+  /// Returns all distinct course names in the cache, sorted alphabetically.
+  Future<List<String>> listNames() async {
+    final db = await _open();
+    final rows = await db.rawQuery(
+      'SELECT DISTINCT name FROM overpass_cache WHERE $_systemKeyFilter ORDER BY name',
+    );
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
+  /// Returns names that contain [query] (case-insensitive).
+  Future<List<String>> search(String query) async {
+    final db = await _open();
+    final rows = await db.rawQuery(
+      'SELECT DISTINCT name FROM overpass_cache '
+      'WHERE name LIKE ? AND $_systemKeyFilter '
+      'ORDER BY name',
+      ['%$query%'],
+    );
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
   Future<void> close() async {
     await _db?.close();
     _db = null;

@@ -79,6 +79,17 @@ Future<void> main(List<String> args) async {
       }
       await checkCourseFromCache(args[1]);
 
+    case 'search-courses':
+      if (args.length < 2) {
+        print('Error: search-courses requires a query.');
+        print('  Usage: dart run bin/cli.dart search-courses "karori"');
+        exit(1);
+      }
+      await searchCachedCourses(args[1]);
+
+    case 'list-courses':
+      await listCachedCourses();
+
     default:
       print('Unknown command: ${args[0]}');
       _usage();
@@ -96,6 +107,8 @@ void _usage() {
   print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
   print('  check-course  <name> [bbox]   Fetch and parse a course, print details (no upsert)');
   print('  check-cache   <name>          Parse from local cache, print details (no Overpass/Supabase)');
+  print('  search-courses <query>        Search cached course names for a partial match');
+  print('  list-courses                  List all course names in the local cache');
   print('  query-course  <name>          Query Supabase for a stored course and print details');
   print('  check-integrity <name>        Query Supabase and report integrity issues');
 }

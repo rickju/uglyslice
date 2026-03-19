@@ -68,8 +68,9 @@ Future<String> reparseCourse(String courseName) async {
   await store.close();
 
   if (rawBody == null) {
-    throw Exception(
-        'No cached JSON for "$courseName". Run ingest-course first.');
+    await store.close();
+    await _suggestFromCache(courseName);
+    throw Exception('No cached JSON for "$courseName".');
   }
 
   print('  → Parsing from cache ...');
@@ -482,6 +483,64 @@ Future<void> checkCourse(String courseName, {String? bbox}) async {
   }
 }
 
+/// Print cached courses whose names contain any word from [query].
+Future<void> _suggestFromCache(String query) async {
+  final store = RawJsonStore();
+  // Try full query first, then each word individually.
+  var matches = await store.search(query);
+  if (matches.isEmpty) {
+    final words = query.split(RegExp(r'\s+')).where((w) => w.length > 2);
+    for (final word in words) {
+      final m = await store.search(word);
+      for (final name in m) {
+        if (!matches.contains(name)) matches.add(name);
+      }
+    }
+  }
+  await store.close();
+
+  if (matches.isEmpty) {
+    print('No cached courses match "$query". Run ingest-course or ingest-all first.');
+  } else {
+    print('No exact match for "$query". Did you mean:');
+    for (final name in matches) {
+      print('  $name');
+    }
+  }
+}
+
+/// Search the local cache for course names matching [query] and print them.
+Future<void> searchCachedCourses(String query) async {
+  final store = RawJsonStore();
+  final matches = await store.search(query);
+  await store.close();
+
+  if (matches.isEmpty) {
+    print('No cached courses match "$query".');
+    return;
+  }
+  print('${matches.length} match(es) for "$query":');
+  for (final name in matches) {
+    print('  $name');
+  }
+}
+
+/// Print all distinct course names in the local cache.
+Future<void> listCachedCourses() async {
+  final store = RawJsonStore();
+  final names = await store.listNames();
+  await store.close();
+
+  if (names.isEmpty) {
+    print('Cache is empty. Run ingest-course or ingest-all first.');
+    return;
+  }
+  print('${names.length} course(s) in cache:');
+  for (final name in names) {
+    print('  $name');
+  }
+}
+
 /// Parse a course from the local SQLite cache and print hole details.
 /// No Overpass or Supabase required — useful for verifying parser output.
 Future<void> checkCourseFromCache(String courseName) async {
@@ -490,7 +549,7 @@ Future<void> checkCourseFromCache(String courseName) async {
   await store.close();
 
   if (rawBody == null) {
-    print('No cached JSON for "$courseName". Run ingest-course first.');
+    await _suggestFromCache(courseName);
     return;
   }
 
