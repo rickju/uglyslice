@@ -420,36 +420,76 @@ ParsedCourse _parseCourseFromWay(Overpass overpass, Way golfCourseWay) {
     if (tp != null) assignToHole(tp, (h) => h.teePlatforms.add(tp));
   }
 
-  // Orient routing lines tee→pin: if the last point is closer to the tee
-  // centroid than the first, the way was drawn pin→tee and needs reversing.
-  for (final hole in holes) {
-    if (hole.teePlatforms.isEmpty || hole.routingLine.length < 2) continue;
-    final pts = hole.teePlatforms.first.points;
-    if (pts.isEmpty) continue;
-    final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
-    final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
-    final tc = LatLng(sumLat / pts.length, sumLon / pts.length);
-
-    double sq(LatLng a, LatLng b) {
-      final dLat = a.latitude - b.latitude;
-      final dLon = a.longitude - b.longitude;
-      return dLat * dLat + dLon * dLon;
-    }
-
-    if (sq(hole.routingLine.last, tc) < sq(hole.routingLine.first, tc)) {
-      hole.routingLine = hole.routingLine.reversed.toList();
-    }
+  double _sq(LatLng a, LatLng b) {
+    final dLat = a.latitude - b.latitude;
+    final dLon = a.longitude - b.longitude;
+    return dLat * dLat + dLon * dLon;
   }
 
-  // Update pin to green centroid where available — more reliable than the
-  // fallback way endpoint (which may be at the wrong end after reversal).
-  for (final hole in holes) {
-    if (hole.greens.isEmpty) continue;
+  LatLng? _greenCentroid(Hole hole) {
+    if (hole.greens.isEmpty) return null;
     final pts = hole.greens.first.points;
-    if (pts.isEmpty) continue;
+    if (pts.isEmpty) return null;
     final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
     final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
-    hole.pin = LatLng(sumLat / pts.length, sumLon / pts.length);
+    return LatLng(sumLat / pts.length, sumLon / pts.length);
+  }
+
+  // Update pin to green centroid first — needed for accurate reversal check
+  // on holes without tee platforms (where the fallback pin is way.points.last).
+  for (final hole in holes) {
+    final gc = _greenCentroid(hole);
+    if (gc != null) hole.pin = gc;
+  }
+
+  // Orient routing lines tee→pin. The last point should be closest to pin.
+  // Priority:
+  //   1. Green assigned → pin is green centroid → use it as anchor
+  //   2. No green but tee platform → use tee centroid (first should be near tee)
+  //   3. Neither → find nearest green from all scoped ways within 150 m
+  for (final hole in holes) {
+    if (hole.routingLine.length < 2) continue;
+
+    if (hole.greens.isNotEmpty) {
+      // Green assigned; pin = green centroid. Reverse if first is closer to pin.
+      if (_sq(hole.routingLine.first, hole.pin) <
+          _sq(hole.routingLine.last, hole.pin)) {
+        hole.routingLine = hole.routingLine.reversed.toList();
+      }
+    } else if (hole.teePlatforms.isNotEmpty) {
+      // No green but tee available. Reverse if last is closer to tee (tee
+      // should be the start).
+      final pts = hole.teePlatforms.first.points;
+      if (pts.isEmpty) continue;
+      final sumLat = pts.fold(0.0, (s, p) => s + p.latitude);
+      final sumLon = pts.fold(0.0, (s, p) => s + p.longitude);
+      final tc = LatLng(sumLat / pts.length, sumLon / pts.length);
+      if (_sq(hole.routingLine.last, tc) < _sq(hole.routingLine.first, tc)) {
+        hole.routingLine = hole.routingLine.reversed.toList();
+      }
+    } else {
+      // No green, no tee — find nearest green from scoped ways.
+      LatLng? bestCentroid;
+      double minSq = double.infinity;
+      for (final gw in scopedWays.where((w) => w.tags['golf'] == 'green')) {
+        if (gw.points.isEmpty) continue;
+        final sumLat = gw.points.fold(0.0, (s, p) => s + p.latitude);
+        final sumLon = gw.points.fold(0.0, (s, p) => s + p.longitude);
+        final gc = LatLng(sumLat / gw.points.length, sumLon / gw.points.length);
+        for (final ep in [hole.routingLine.first, hole.routingLine.last]) {
+          final d = _sq(ep, gc);
+          if (d < minSq) { minSq = d; bestCentroid = gc; }
+        }
+      }
+      // Only use if within ~150 m of an endpoint
+      if (bestCentroid != null && minSq < (150.0 / 111000) * (150.0 / 111000)) {
+        if (_sq(hole.routingLine.first, bestCentroid) <
+            _sq(hole.routingLine.last, bestCentroid)) {
+          hole.routingLine = hole.routingLine.reversed.toList();
+        }
+        hole.pin = bestCentroid;
+      }
+    }
   }
 
   // Extract tee info from unique tee colors

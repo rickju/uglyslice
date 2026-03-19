@@ -97,6 +97,45 @@ Future<String> reparseCourse(String courseName) async {
   return parsed.courseId;
 }
 
+/// Print raw OSM elements for a specific hole from the cached JSON.
+Future<void> inspectCachedHole(String courseName, int holeRef) async {
+  final store = RawJsonStore();
+  final rawBody = await store.load(courseName);
+  await store.close();
+
+  if (rawBody == null) {
+    print('No cached JSON for "$courseName". Run ingest-course first.');
+    return;
+  }
+
+  final data = jsonDecode(rawBody) as Map<String, dynamic>;
+  final elements = data['elements'] as List<dynamic>;
+
+  final holeElements = elements.where((e) {
+    final tags = (e['tags'] as Map<String, dynamic>?) ?? {};
+    return tags['golf'] == 'hole' && tags['ref'] == '$holeRef';
+  }).toList();
+
+  if (holeElements.isEmpty) {
+    print('No hole ref=$holeRef found in cached data for "$courseName".');
+    return;
+  }
+
+  for (final el in holeElements) {
+    final tags = (el['tags'] as Map<String, dynamic>?) ?? {};
+    final geom = (el['geometry'] as List<dynamic>?) ?? [];
+    print('type    : ${el['type']}');
+    print('id      : ${el['id']}');
+    print('tags    : $tags');
+    print('geometry: ${geom.length} points');
+    if (geom.isNotEmpty) {
+      print('  first : ${geom.first}');
+      print('  last  : ${geom.last}');
+    }
+    print('');
+  }
+}
+
 typedef IngestAllResult = ({int total, int succeeded, int failed});
 
 /// Shared ingest logic: runs list+detail Overpass queries, upserts course_list,
