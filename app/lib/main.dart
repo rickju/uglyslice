@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'auth_page.dart';
 import 'config.dart';
 import 'database/app_database.dart';
 import 'services/sync_service.dart';
@@ -30,24 +31,23 @@ Future<void> main() async {
     supabase: Supabase.instance.client,
   );
 
-  // Sign in anonymously if no existing session.
-  // Requires "Allow anonymous sign-ins" enabled in Supabase Auth settings.
-  try {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      await Supabase.instance.client.auth.signInAnonymously();
-    }
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId != null) {
+  // If there's an existing session (real or anonymous), resume it and go straight
+  // to the main screen. Otherwise show the auth page.
+  Widget home;
+  final session = Supabase.instance.client.auth.currentSession;
+  if (session != null) {
+    final userId = session.user.id;
+    try {
       await syncService.setUser(userId);
-      // Fire course sync in background — app is usable immediately from local SQLite.
       courseSyncService.syncAll().catchError(
           (e) => debugPrint('Course sync failed: $e'));
+    } catch (e) {
+      debugPrint('Sync setup failed, running offline: $e');
     }
-  } catch (e) {
-    // Sync disabled — app works fully offline without auth.
-    debugPrint('Supabase auth failed, running offline: $e');
+    home = const MainScreen();
+  } else {
+    home = const AuthPage();
   }
 
-  runApp(const MaterialApp(home: MainScreen()));
+  runApp(MaterialApp(home: home));
 }
