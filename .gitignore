@@ -12,7 +12,6 @@ supabase/.temp/
 app/ugly_slice.iml
 app/lib/config.dart
 
-app/linux/
 
 # Miscellaneous
 *.class
