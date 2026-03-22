@@ -172,24 +172,6 @@ class _RoundPageState extends State<RoundPage> {
     }
 
     return Scaffold(
-      // toolbar
-      appBar: AppBar(
-        title: Text(
-          _round!.course.holes.isNotEmpty
-              ? 'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}'
-              : 'Golf App',
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(_isSatellite ? Icons.map : Icons.satellite),
-            onPressed: () {
-              setState(() {
-                _isSatellite = !_isSatellite;
-              });
-            },
-          ),
-        ],
-      ),
       body: Stack(
         children: [
           FlutterMap(
@@ -336,6 +318,26 @@ class _RoundPageState extends State<RoundPage> {
                 ),
             ],
           ),
+          // --- satellite toggle: top-left ---
+          Positioned(
+            top: 10,
+            left: 16,
+            child: GestureDetector(
+              onTap: () => setState(() => _isSatellite = !_isSatellite),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  _isSatellite ? Icons.map : Icons.satellite,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
           // --- distance badge: top-right ---
           Positioned(
             top: 10,
@@ -388,28 +390,31 @@ class _RoundPageState extends State<RoundPage> {
                         _fitMapToHoleView(_currentHoleIndex);
                       },
                     ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                    GestureDetector(
+                      onTap: () => _showHoleMenu(context),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Par ${_round!.course.holes[_currentHoleIndex].par}',
-                          style: const TextStyle(
-                            color: Colors.white60,
-                            fontSize: 13,
+                          const SizedBox(width: 8),
+                          Text(
+                            'Par ${_round!.course.holes[_currentHoleIndex].par}',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.arrow_forward, color: Colors.white),
@@ -492,6 +497,41 @@ class _RoundPageState extends State<RoundPage> {
                     ),
             ),
         ],
+      ),
+    );
+  }
+
+  void _showHoleMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.exit_to_app, color: Colors.white),
+              title: const Text('Exit to main page',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context); // close sheet
+                Navigator.pop(context); // exit round page
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.sports_golf, color: Colors.white),
+              title: const Text('Manage clubs',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                // TODO: navigate to club manager
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
