@@ -146,19 +146,27 @@ class _RoundPageState extends State<RoundPage> {
       );
     }
 
-    int distanceInYards = 0;
-    LatLng? targetGreen;
-    if (_round!.course.holes.isNotEmpty) {
-      targetGreen = _round!.course.holes[_currentHoleIndex].pin;
-    }
+    int? distFront, distPin, distBack;
+    if (_round!.course.holes.isNotEmpty && _currentPlayerPos != null) {
+      final hole = _round!.course.holes[_currentHoleIndex];
+      final pos = _currentPlayerPos!;
+      final dist = const Distance();
 
-    if (_currentPlayerPos != null && targetGreen != null) {
-      double meters = const Distance().as(
-        LengthUnit.Meter,
-        _currentPlayerPos!,
-        targetGreen,
-      );
-      distanceInYards = (meters * 1.09361).round();
+      distPin = (dist.as(LengthUnit.Meter, pos, hole.pin) * 1.09361).round();
+
+      // Front = green polygon point closest to player
+      // Back  = green polygon point farthest from player
+      final greenPoints = hole.greens.expand((g) => g.points).toList();
+      if (greenPoints.isNotEmpty) {
+        double minM = double.infinity, maxM = 0;
+        for (final pt in greenPoints) {
+          final m = dist.as(LengthUnit.Meter, pos, pt);
+          if (m < minM) minM = m;
+          if (m > maxM) maxM = m;
+        }
+        distFront = (minM * 1.09361).round();
+        distBack  = (maxM * 1.09361).round();
+      }
     }
 
     return Scaffold(
@@ -336,16 +344,20 @@ class _RoundPageState extends State<RoundPage> {
                 color: Colors.black54,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                _currentPlayerPos == null
-                    ? 'Locating...'
-                    : '$distanceInYards YDS',
-                style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              child: _currentPlayerPos == null
+                  ? const Text('Locating...',
+                      style: TextStyle(color: Colors.white70, fontSize: 14))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (distFront != null)
+                          _DistRow(label: 'F', value: distFront!, color: Colors.white70),
+                        _DistRow(label: 'P', value: distPin ?? 0, color: Colors.greenAccent),
+                        if (distBack != null)
+                          _DistRow(label: 'B', value: distBack!, color: Colors.white70),
+                      ],
+                    ),
             ),
           ),
           // --- hole nav: bottom ---
@@ -366,13 +378,12 @@ class _RoundPageState extends State<RoundPage> {
                     IconButton(
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () {
-                        if (_currentHoleIndex > 0) {
-                          setState(() {
-                            _currentHoleIndex--;
-                            _selectedTee = null;
-                          });
-                          _fitMapToHoleView(_currentHoleIndex);
-                        }
+                        final total = _round!.course.holes.length;
+                        setState(() {
+                          _currentHoleIndex = (_currentHoleIndex - 1 + total) % total;
+                          _selectedTee = null;
+                        });
+                        _fitMapToHoleView(_currentHoleIndex);
                       },
                     ),
                     Text(
@@ -386,14 +397,12 @@ class _RoundPageState extends State<RoundPage> {
                     IconButton(
                       icon: const Icon(Icons.arrow_forward, color: Colors.white),
                       onPressed: () {
-                        if (_currentHoleIndex <
-                            _round!.course.holes.length - 1) {
-                          setState(() {
-                            _currentHoleIndex++;
-                            _selectedTee = null;
-                          });
-                          _fitMapToHoleView(_currentHoleIndex);
-                        }
+                        final total = _round!.course.holes.length;
+                        setState(() {
+                          _currentHoleIndex = (_currentHoleIndex + 1) % total;
+                          _selectedTee = null;
+                        });
+                        _fitMapToHoleView(_currentHoleIndex);
                       },
                     ),
                   ],
@@ -478,5 +487,31 @@ class _RoundPageState extends State<RoundPage> {
         : pin;
 
     _mapController.moveAndRotate(mid, zoom, -bearing);
+  }
+}
+
+class _DistRow extends StatelessWidget {
+  final String label;
+  final int value;
+  final Color color;
+
+  const _DistRow({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label,
+            style: TextStyle(color: color.withValues(alpha: 0.6), fontSize: 11)),
+        const SizedBox(width: 6),
+        Text('$value',
+            style: TextStyle(
+                color: color, fontSize: 22, fontWeight: FontWeight.bold)),
+        const SizedBox(width: 4),
+        Text('yds',
+            style: TextStyle(color: color.withValues(alpha: 0.6), fontSize: 11)),
+      ],
+    );
   }
 }
