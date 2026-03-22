@@ -326,17 +326,36 @@ class _RoundPageState extends State<RoundPage> {
                 ),
             ],
           ),
+          // --- distance badge: top-right ---
+          Positioned(
+            top: 10,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                _currentPlayerPos == null
+                    ? 'Locating...'
+                    : '$distanceInYards YDS',
+                style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          // --- hole nav: bottom ---
           if (_round!.course.holes.isNotEmpty)
             Positioned(
-              // --- top toolbar ---
-              top: 10,
+              bottom: 30,
               left: 20,
               right: 20,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 15,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 15),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(10),
@@ -345,7 +364,6 @@ class _RoundPageState extends State<RoundPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
-                      // --- button: Previous Hole ---
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () {
                         if (_currentHoleIndex > 0) {
@@ -366,11 +384,7 @@ class _RoundPageState extends State<RoundPage> {
                       ),
                     ),
                     IconButton(
-                      // --- button: Next Hole ----
-                      icon: const Icon(
-                        Icons.arrow_forward,
-                        color: Colors.white,
-                      ),
+                      icon: const Icon(Icons.arrow_forward, color: Colors.white),
                       onPressed: () {
                         if (_currentHoleIndex <
                             _round!.course.holes.length - 1) {
@@ -386,78 +400,6 @@ class _RoundPageState extends State<RoundPage> {
                 ),
               ),
             ),
-          Positioned(
-            // --- bottom toolbar ---
-            bottom: 30,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 25),
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Distance to green center',
-                          style: TextStyle(color: Colors.white70, fontSize: 16),
-                        ),
-                      ),
-                      Text(
-                        _currentPlayerPos == null
-                            ? "Locating..."
-                            : '$distanceInYards YDS',
-                        style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: 'gps_button',
-            onPressed: () {
-              if (_currentPlayerPos != null &&
-                  _round!.course.holes.isNotEmpty) {
-                final targetGreen = _round!.course.holes[_currentHoleIndex].pin;
-                final bearing = const Distance().bearing(
-                  _currentPlayerPos!,
-                  targetGreen,
-                );
-                _mapController.moveAndRotate(
-                  _currentPlayerPos!,
-                  16.0,
-                  -bearing,
-                );
-              }
-            },
-            child: const Icon(Icons.gps_fixed),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: 'add_shot_button',
-            onPressed: () {
-              if (_currentPlayerPos != null) {
-                debugPrint('Recording shot at: $_currentPlayerPos');
-              }
-            },
-            child: const Icon(Icons.add),
-          ),
         ],
       ),
     );
