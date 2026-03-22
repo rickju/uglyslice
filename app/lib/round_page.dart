@@ -30,6 +30,8 @@ class _RoundPageState extends State<RoundPage> {
   LatLng? _selectedTee;
   LatLng? _rulerTarget;
   bool _isSatellite = true;
+  final Map<int, int> _strokes = {}; // hole index → stroke count
+  bool _strokeEditing = false;
 
   String? _errorMessage;
   final MapController _mapController = MapController();
@@ -386,13 +388,28 @@ class _RoundPageState extends State<RoundPage> {
                         _fitMapToHoleView(_currentHoleIndex);
                       },
                     ),
-                    Text(
-                      'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Par ${_round!.course.holes[_currentHoleIndex].par}',
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
                     ),
                     IconButton(
                       icon: const Icon(Icons.arrow_forward, color: Colors.white),
@@ -408,6 +425,71 @@ class _RoundPageState extends State<RoundPage> {
                   ],
                 ),
               ),
+            ),
+          // --- stroke editor: bottom-right, above hole nav ---
+          if (_round!.course.holes.isNotEmpty)
+            Positioned(
+              bottom: 90,
+              right: 16,
+              child: _strokeEditing
+                  ? Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove, color: Colors.white),
+                            onPressed: () => setState(() {
+                              final cur = _strokes[_currentHoleIndex] ?? 0;
+                              if (cur > 0) _strokes[_currentHoleIndex] = cur - 1;
+                            }),
+                          ),
+                          Text(
+                            '${_strokes[_currentHoleIndex] ?? 0}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add, color: Colors.white),
+                            onPressed: () => setState(() {
+                              final cur = _strokes[_currentHoleIndex] ?? 0;
+                              _strokes[_currentHoleIndex] = cur + 1;
+                            }),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.check, color: Colors.greenAccent),
+                            onPressed: () => setState(() => _strokeEditing = false),
+                          ),
+                        ],
+                      ),
+                    )
+                  : GestureDetector(
+                      onTap: () => setState(() => _strokeEditing = true),
+                      child: Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${_strokes[_currentHoleIndex] ?? 0}',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ),
             ),
         ],
       ),
