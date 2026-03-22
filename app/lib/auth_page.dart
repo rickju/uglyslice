@@ -5,7 +5,6 @@ import 'dart:io' show Platform;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -24,29 +23,29 @@ class _AuthPageState extends State<AuthPage> {
   String? _error;
 
   Future<void> _signInGoogle() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _error = null);
     try {
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) {
-        setState(() => _loading = false);
-        return;
-      }
-      final auth = await googleUser.authentication;
-      await Supabase.instance.client.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken: auth.idToken!,
-        accessToken: auth.accessToken,
+      final redirectTo = (kIsWeb || Platform.isLinux || Platform.isWindows || Platform.isMacOS)
+          ? null
+          : 'nz.uglyslice.app://login-callback';
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectTo,
       );
-      _proceed();
+      // Browser is now open. Listen for the session to arrive when user
+      // completes sign-in and the redirect brings them back.
+      _listenForSession();
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
+      setState(() => _error = e.toString());
     }
+  }
+
+  void _listenForSession() {
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedIn) {
+        _proceed();
+      }
+    });
   }
 
   Future<void> _signInApple() async {
