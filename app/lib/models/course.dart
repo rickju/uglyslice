@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:latlong2/latlong.dart';
 import 'package:dart_jts/dart_jts.dart' as jts;
 import 'jts.dart';
@@ -68,6 +70,58 @@ class TeePlatform {
   });
 
   String? get color => tags['color'] as String?;
+
+  /// Oriented bounding rectangle aligned with [bearingDeg] (degrees CW from north).
+  /// Major axis is along the playing direction. Returns a closed 5-point ring.
+  List<LatLng> orientedRect(double bearingDeg) {
+    if (points.isEmpty) return [];
+    final cLat = points.map((p) => p.latitude).reduce((a, b) => a + b) / points.length;
+    final cLon = points.map((p) => p.longitude).reduce((a, b) => a + b) / points.length;
+    const metersPerDeg = 111320.0;
+    final cosLat = math.cos(cLat * math.pi / 180);
+    final bRad = bearingDeg * math.pi / 180;
+    final sinB = math.sin(bRad);
+    final cosB = math.cos(bRad);
+
+    // Project each point into (along, across) frame.
+    // along = projection onto playing direction; across = perpendicular.
+    var minAlong = double.infinity, maxAlong = double.negativeInfinity;
+    var minAcross = double.infinity, maxAcross = double.negativeInfinity;
+    for (final p in points) {
+      final xm = (p.longitude - cLon) * metersPerDeg * cosLat;
+      final ym = (p.latitude - cLat) * metersPerDeg;
+      final along = xm * sinB + ym * cosB;
+      final across = xm * cosB - ym * sinB;
+      if (along < minAlong) minAlong = along;
+      if (along > maxAlong) maxAlong = along;
+      if (across < minAcross) minAcross = across;
+      if (across > maxAcross) maxAcross = across;
+    }
+
+    // Minimum dimensions: 6 m along, 3 m across.
+    if (maxAlong - minAlong < 6.0) {
+      final mid = (maxAlong + minAlong) / 2;
+      minAlong = mid - 3.0; maxAlong = mid + 3.0;
+    }
+    if (maxAcross - minAcross < 3.0) {
+      final mid = (maxAcross + minAcross) / 2;
+      minAcross = mid - 1.5; maxAcross = mid + 1.5;
+    }
+
+    LatLng corner(double along, double across) {
+      final xm = along * sinB + across * cosB;
+      final ym = along * cosB - across * sinB;
+      return LatLng(cLat + ym / metersPerDeg, cLon + xm / (metersPerDeg * cosLat));
+    }
+
+    return [
+      corner(minAlong, minAcross),
+      corner(maxAlong, minAcross),
+      corner(maxAlong, maxAcross),
+      corner(minAlong, maxAcross),
+      corner(minAlong, minAcross),
+    ];
+  }
 
   // Axis-aligned bounding rect as a closed polygon ring (5 points).
   List<LatLng> get boundingRect {

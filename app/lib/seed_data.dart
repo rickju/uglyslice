@@ -60,7 +60,7 @@ final _driver = Club(
     name: 'Driver',
     brand: 'TaylorMade',
     number: '1',
-    type: ClubType.wood,
+    type: ClubType.driver,
     loft: 10);
 
 final _putter = Club(

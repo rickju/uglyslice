@@ -30,6 +30,7 @@ class Round extends Equatable implements Syncable {
   final List<HolePlay> holePlays;
   final String status;
   final List<LatLng> trail;
+  final List<LatLng> hitPositions;
 
   Round({
     String? id,
@@ -42,6 +43,7 @@ class Round extends Equatable implements Syncable {
     this.holePlays = const [],
     this.status = 'in_progress',
     this.trail = const [],
+    this.hitPositions = const [],
   })  : id = id ?? const Uuid().v4(),
         updatedAt = updatedAt ?? DateTime.now().toUtc();
 
@@ -75,6 +77,9 @@ class Round extends Equatable implements Syncable {
       trail: (decoded['trail'] as List? ?? [])
           .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
           .toList(),
+      hitPositions: (decoded['hitPositions'] as List? ?? [])
+          .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
+          .toList(),
     );
   }
 
@@ -102,6 +107,7 @@ class Round extends Equatable implements Syncable {
         'data': jsonEncode({
           'holePlays': holePlays.map((hp) => hp.toMap()).toList(),
           'trail': trail.map((p) => [p.latitude, p.longitude]).toList(),
+          'hitPositions': hitPositions.map((p) => [p.latitude, p.longitude]).toList(),
         }),
       };
 
@@ -129,6 +135,9 @@ class Round extends Equatable implements Syncable {
       trail: (data['trail'] as List? ?? [])
           .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
           .toList(),
+      hitPositions: (data['hitPositions'] as List? ?? [])
+          .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
+          .toList(),
     );
   }
 
@@ -151,6 +160,7 @@ class Round extends Equatable implements Syncable {
     List<HolePlay>? holePlays,
     String? status,
     List<LatLng>? trail,
+    List<LatLng>? hitPositions,
   }) =>
       Round(
         id: id ?? this.id,
@@ -163,6 +173,7 @@ class Round extends Equatable implements Syncable {
         holePlays: holePlays ?? this.holePlays,
         status: status ?? this.status,
         trail: trail ?? this.trail,
+        hitPositions: hitPositions ?? this.hitPositions,
       );
 
   // ── Legacy (scorecard display) ───────────────────────────────────────────────
@@ -205,6 +216,7 @@ class _RoundCompanion extends UpdateCompanion<Syncable> {
     final dataJson = jsonEncode({
       'holePlays': _r.holePlays.map((h) => h.toMap()).toList(),
       'trail': _r.trail.map((p) => [p.latitude, p.longitude]).toList(),
+      'hitPositions': _r.hitPositions.map((p) => [p.latitude, p.longitude]).toList(),
     });
     // Variable<String> constructor accepts String? — null becomes SQL NULL
     final map = <String, Expression>{

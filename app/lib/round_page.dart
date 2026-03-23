@@ -42,6 +42,7 @@ class _RoundPageState extends State<RoundPage> {
   final Map<int, int> _strokes = {}; // hole index → stroke count
   bool _strokeEditing = false;
   final List<LatLng> _breadcrumb = [];
+  final List<LatLng> _hitPositions = [];
   // shot position dragging (review mode)
   int? _draggingShotIdx;
   final Map<int, LatLng> _draggedShotPositions = {};   // live during drag
@@ -80,6 +81,7 @@ class _RoundPageState extends State<RoundPage> {
             player: Player(name: 'Rick'), course: golfCourse, date: DateTime.now());
       }
       _breadcrumb.addAll(_round!.trail);
+      _hitPositions.addAll(_round!.hitPositions);
       _isLoading = false;
     });
     if (review != null) _initCommittedPositionsForHole();
@@ -88,14 +90,7 @@ class _RoundPageState extends State<RoundPage> {
     if (review == null) _determinePosition();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_breadcrumb.length >= 2) {
-        _mapController.fitCamera(CameraFit.bounds(
-          bounds: LatLngBounds.fromPoints(_breadcrumb),
-          padding: const EdgeInsets.all(50),
-        ));
-      } else if (_round!.course.holes.isNotEmpty) {
-        _fitMapToHoleView(0);
-      }
+      if (_round!.course.holes.isNotEmpty) _fitMapToHoleView(0);
     });
   } // _loadCourse
 
@@ -255,9 +250,15 @@ class _RoundPageState extends State<RoundPage> {
                         borderStrokeWidth: 1,
                       ),
                     for (final tp in hole.teePlatforms)
-                      if (tp.boundingRect.isNotEmpty)
+                      if (tp.points.isNotEmpty)
                         Polygon(
-                          points: tp.boundingRect,
+                          points: tp.orientedRect(
+                            hole.routingLine.length >= 2
+                                ? const Distance().bearing(
+                                    hole.routingLine.first,
+                                    hole.routingLine[1])
+                                : 0.0,
+                          ),
                           color: _getColorForFeature(tp.tags['golf']),
                           borderColor: Colors.white,
                           borderStrokeWidth: 0.5,
@@ -408,6 +409,19 @@ class _RoundPageState extends State<RoundPage> {
                         ),
                   ],
                 ),
+              // --- hit-detected position markers ---
+              if (_hitPositions.isNotEmpty)
+                MarkerLayer(
+                  markers: [
+                    for (final pos in _hitPositions)
+                      Marker(
+                        point: pos,
+                        width: 20,
+                        height: 20,
+                        child: const _HitMarker(),
+                      ),
+                  ],
+                ),
               // --- shot markers for current hole (review mode) ---
               if (widget.reviewRound != null)
                 MarkerLayer(
@@ -418,6 +432,7 @@ class _RoundPageState extends State<RoundPage> {
                         width: 28,
                         height: 28,
                         child: GestureDetector(
+                          onTap: () => _showShotEditor(i),
                           onPanStart: (_) =>
                               setState(() => _draggingShotIdx = i),
                           onPanUpdate: (d) => _onShotDragUpdate(i, d),
@@ -425,6 +440,9 @@ class _RoundPageState extends State<RoundPage> {
                           child: _ShotMarker(
                             label: _clubLabel(shot.club),
                             dragging: _draggingShotIdx == i,
+                            penalty: shot.penalty,
+                            isTeeShot: shot.isTeeShot,
+                            isRecovery: shot.isRecovery,
                           ),
                         ),
                       ),
@@ -640,6 +658,9 @@ class _RoundPageState extends State<RoundPage> {
                     trail: isReview
                         ? _round!.trail
                         : List.unmodifiable(_breadcrumb),
+                    hitPositions: isReview
+                        ? _round!.hitPositions
+                        : List.unmodifiable(_hitPositions),
                     holePlays: _buildHolePlaysFromStrokes(),
                   );
                   await RoundRepository(db).updateRound(_round!.id, updated);
@@ -764,11 +785,7 @@ class _RoundPageState extends State<RoundPage> {
         final newPos = _draggedShotPositions[i];
         if (newPos == null) return hp.shots[i];
         final s = hp.shots[i];
-        return Shot(
-            startLocation: newPos,
-            endLocation: s.endLocation,
-            club: s.club,
-            lieType: s.lieType);
+        return s.copyWith(startLocation: newPos);
       });
       return HolePlay(holeNumber: holeNum, shots: shots);
     }).toList();
@@ -789,14 +806,47 @@ class _RoundPageState extends State<RoundPage> {
         .toList();
   }
 
-  String _clubLabel(Club club) {
+  /// Call this when a swing/hit is detected to record the current GPS position.
+  void recordHit() {
+    if (_currentPlayerPos == null) return;
+    setState(() => _hitPositions.add(_currentPlayerPos!));
+  }
+
+  void _showShotEditor(int shotIdx) {
+    final shots = _currentHoleShots();
+    if (shotIdx >= shots.length) return;
+    final shot = shots[shotIdx];
+    showModalBottomSheet<Shot?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ShotEditorSheet(shot: shot),
+    ).then((updated) {
+      if (updated == null) return;
+      final holeNum = _currentHoleIndex + 1;
+      final updatedHolePlays = _round!.holePlays.map((hp) {
+        if (hp.holeNumber != holeNum) return hp;
+        final newShots = List<Shot>.from(hp.shots);
+        newShots[shotIdx] = updated;
+        return HolePlay(holeNumber: holeNum, shots: newShots);
+      }).toList();
+      setState(() => _round = _round!.copyWith(holePlays: updatedHolePlays));
+      RoundRepository(db).updateRound(_round!.id, _round!);
+    });
+  }
+
+  String _clubLabel(Club? club) {
+    if (club == null) return 'Pen';
+    for (final (label, c) in _kBagClubs) {
+      if (c.name == club.name) return label;
+    }
     switch (club.type) {
       case ClubType.driver:
-        return 'D';
+        return 'Dr';
       case ClubType.wood:
-        return 'W${club.number}';
+        return '${club.number}w';
       case ClubType.hybrid:
-        return 'H${club.number}';
+        return '${club.number}h';
       case ClubType.putter:
         return 'P';
       default:
@@ -827,8 +877,7 @@ class _RoundPageState extends State<RoundPage> {
         (_) => Shot(
           startLocation: base?.endLocation ?? base?.startLocation ??
               _currentPlayerPos ?? const LatLng(0, 0),
-          club: base?.club ??
-              Club(name: 'Unknown', brand: '', number: '?', type: ClubType.iron, loft: 30),
+          club: base?.club,
           lieType: LieType.fairway,
         ),
       );
@@ -941,28 +990,294 @@ class _DistRow extends StatelessWidget {
 class _ShotMarker extends StatelessWidget {
   final String label;
   final bool dragging;
+  final bool penalty;
+  final bool isTeeShot;
+  final bool isRecovery;
 
-  const _ShotMarker({required this.label, this.dragging = false});
+  const _ShotMarker({
+    required this.label,
+    this.dragging = false,
+    this.penalty = false,
+    this.isTeeShot = false,
+    this.isRecovery = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = dragging ? Colors.white : Colors.yellow;
+    final Color accent = penalty
+        ? Colors.redAccent
+        : isTeeShot
+            ? Colors.lightBlueAccent
+            : isRecovery
+                ? Colors.orangeAccent
+                : Colors.yellow;
+    final borderColor = dragging ? Colors.white : accent;
     final borderWidth = dragging ? 2.5 : 1.5;
     return Container(
       width: 28,
       height: 28,
       decoration: BoxDecoration(
-        color: dragging ? Colors.yellow.withValues(alpha: 0.25) : Colors.black87,
+        color: dragging ? accent.withValues(alpha: 0.25) : Colors.black87,
         shape: BoxShape.circle,
         border: Border.all(color: borderColor, width: borderWidth),
       ),
       child: Center(
         child: Text(
           label,
-          style: const TextStyle(
-            color: Colors.yellow,
+          style: TextStyle(
+            color: accent,
             fontSize: 10,
             fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Club bag used in the shot editor
+// ---------------------------------------------------------------------------
+
+final _kBagClubs = [
+  ('Dr',  Club(name: 'Driver',  brand: '', number: '1',  type: ClubType.driver, loft: 10)),
+  ('3w',  Club(name: '3 Wood',  brand: '', number: '3',  type: ClubType.wood,   loft: 15)),
+  ('5w',  Club(name: '5 Wood',  brand: '', number: '5',  type: ClubType.wood,   loft: 18)),
+  ('7w',  Club(name: '7 Wood',  brand: '', number: '7',  type: ClubType.wood,   loft: 21)),
+  ('3h',  Club(name: '3 Hybrid', brand: '', number: '3', type: ClubType.hybrid, loft: 19)),
+  ('4h',  Club(name: '4 Hybrid', brand: '', number: '4', type: ClubType.hybrid, loft: 22)),
+  ('5h',  Club(name: '5 Hybrid', brand: '', number: '5', type: ClubType.hybrid, loft: 25)),
+  ('3i',  Club(name: '3 Iron',  brand: '', number: '3',  type: ClubType.iron,   loft: 21)),
+  ('4i',  Club(name: '4 Iron',  brand: '', number: '4',  type: ClubType.iron,   loft: 24)),
+  ('5i',  Club(name: '5 Iron',  brand: '', number: '5',  type: ClubType.iron,   loft: 27)),
+  ('6i',  Club(name: '6 Iron',  brand: '', number: '6',  type: ClubType.iron,   loft: 30)),
+  ('7i',  Club(name: '7 Iron',  brand: '', number: '7',  type: ClubType.iron,   loft: 34)),
+  ('8i',  Club(name: '8 Iron',  brand: '', number: '8',  type: ClubType.iron,   loft: 38)),
+  ('9i',  Club(name: '9 Iron',  brand: '', number: '9',  type: ClubType.iron,   loft: 42)),
+  ('PW',  Club(name: 'PW',      brand: '', number: 'P',  type: ClubType.iron,   loft: 46)),
+  ('GW',  Club(name: 'GW',      brand: '', number: 'G',  type: ClubType.iron,   loft: 50)),
+  ('SW',  Club(name: 'SW',      brand: '', number: 'S',  type: ClubType.iron,   loft: 54)),
+  ('LW',  Club(name: 'LW',      brand: '', number: 'L',  type: ClubType.iron,   loft: 58)),
+  ('P',   Club(name: 'Putter',  brand: '', number: 'P',  type: ClubType.putter, loft: 4)),
+];
+
+class _ShotEditorSheet extends StatelessWidget {
+  final Shot shot;
+  const _ShotEditorSheet({required this.shot});
+
+  void _pop(BuildContext context, Shot updated) =>
+      Navigator.pop(context, updated);
+
+  @override
+  Widget build(BuildContext context) {
+    final club = shot.club;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // drag handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 4),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white30,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text(
+              'Edit stroke',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          // flags row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                _FlagChip(
+                  label: 'Penalty',
+                  color: Colors.redAccent,
+                  selected: shot.penalty,
+                  onTap: () => _pop(context,
+                      Shot(
+                        startLocation: shot.startLocation,
+                        endLocation: shot.endLocation,
+                        club: shot.penalty ? shot.club : null,
+                        lieType: shot.lieType,
+                        penalty: !shot.penalty,
+                        isTeeShot: shot.isTeeShot,
+                        isRecovery: shot.isRecovery,
+                      )),
+                ),
+                const SizedBox(width: 8),
+                _FlagChip(
+                  label: 'Tee shot',
+                  color: Colors.lightBlueAccent,
+                  selected: shot.isTeeShot,
+                  onTap: () => _pop(context,
+                      Shot(
+                        startLocation: shot.startLocation,
+                        endLocation: shot.endLocation,
+                        club: shot.club,
+                        lieType: shot.lieType,
+                        penalty: shot.penalty,
+                        isTeeShot: !shot.isTeeShot,
+                        isRecovery: shot.isRecovery,
+                      )),
+                ),
+                const SizedBox(width: 8),
+                _FlagChip(
+                  label: 'Recovery',
+                  color: Colors.orangeAccent,
+                  selected: shot.isRecovery,
+                  onTap: () => _pop(context,
+                      Shot(
+                        startLocation: shot.startLocation,
+                        endLocation: shot.endLocation,
+                        club: shot.club,
+                        lieType: shot.lieType,
+                        penalty: shot.penalty,
+                        isTeeShot: shot.isTeeShot,
+                        isRecovery: !shot.isRecovery,
+                      )),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          // club grid
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final (label, c) in _kBagClubs)
+                  GestureDetector(
+                    onTap: () => _pop(context,
+                        Shot(
+                          startLocation: shot.startLocation,
+                          endLocation: shot.endLocation,
+                          club: c,
+                          lieType: shot.lieType,
+                          penalty: false,
+                          isTeeShot: shot.isTeeShot,
+                          isRecovery: shot.isRecovery,
+                        )),
+                    child: Container(
+                      width: 44,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: club?.name == c.name
+                            ? Colors.yellow
+                            : const Color(0xFF2C2C2C),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: club?.name == c.name
+                              ? Colors.yellow
+                              : Colors.white24,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            color: club?.name == c.name
+                                ? Colors.black
+                                : Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+}
+
+class _FlagChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FlagChip({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.2) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : Colors.white24,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? color : Colors.white54,
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HitMarker extends StatelessWidget {
+  const _HitMarker();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.cyanAccent, width: 1.5),
+      ),
+      child: const Center(
+        child: Text(
+          '+',
+          style: TextStyle(
+            color: Colors.cyanAccent,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            height: 1,
           ),
         ),
       ),
