@@ -83,11 +83,13 @@ List<LatLng> _holeTrail(int holeIdx, int roundIdx, {int steps = 8}) {
   final dlat = pinLat - teeLat;
   final dlon = pinLon - teeLon;
   final len = sqrt(dlat * dlat + dlon * dlon);
-  // Unit perpendicular (rotated 90°)
+  // Unit perpendicular in degree-space (rotated 90°).
+  // At -41° lat: 1° lat ≈ 111 km, 1° lon ≈ 84 km, so this isn't
+  // isometric — but the amplitude below compensates by targeting ~12 m.
   final perpLat = len > 0 ? -dlon / len : 0.0;
   final perpLon = len > 0 ? dlat / len : 0.0;
-  // Scatter amplitude ~15 m in degrees (≈ 0.000135°/m)
-  final amp = 0.0020 * (0.5 + (roundIdx + holeIdx) % 3 * 0.25);
+  // ~12–18 m lateral scatter (0.00013° ≈ 14 m in lat at this latitude)
+  final amp = 0.00013 + (roundIdx * 3 + holeIdx) % 3 * 0.00003;
   final phase = (roundIdx * 7 + holeIdx * 3) * 0.4;
 
   return [
