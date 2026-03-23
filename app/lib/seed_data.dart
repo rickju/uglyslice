@@ -113,6 +113,53 @@ List<LatLng> _buildRoundTrail(int roundIdx) {
   return trail;
 }
 
+/// Small random jitter (~0–5 m) around a point, seeded deterministically.
+LatLng _jitter(LatLng p, int seed) {
+  final rng = Random(seed);
+  // 0.00005° ≈ 5.5 m lat, ≈ 4.2 m lon at -41°
+  return LatLng(
+    p.latitude  + (rng.nextDouble() - 0.5) * 0.00005,
+    p.longitude + (rng.nextDouble() - 0.5) * 0.00005,
+  );
+}
+
+/// Generate hit positions for a round.
+///
+/// For each real shot: the watch records 1 hit (sometimes 2 if a practice
+/// swing was taken). Putts are excluded — phone/watch rarely detects them.
+/// A few false-positive detections are scattered along the trail at random.
+List<LatLng> _buildHitPositions(int roundIdx, List<List<Shot>> holeShots) {
+  final hits = <LatLng>[];
+  final rng = Random(roundIdx * 31);
+
+  for (int h = 0; h < holeShots.length; h++) {
+    final shots = holeShots[h];
+    for (int k = 0; k < shots.length; k++) {
+      final shot = shots[k];
+      // Skip putts — watch rarely triggers on putting stroke.
+      if (shot.club?.type == ClubType.putter) continue;
+
+      // Real hit — slightly jittered from the shot start position.
+      hits.add(_jitter(shot.startLocation, roundIdx * 1000 + h * 100 + k));
+
+      // ~35% chance of a practice swing (extra hit) before this shot.
+      if (rng.nextDouble() < 0.35) {
+        hits.add(_jitter(shot.startLocation, roundIdx * 999 + h * 97 + k + 50));
+      }
+    }
+
+    // ~1 false positive per hole (watch detected a non-swing movement).
+    if (shots.isNotEmpty && rng.nextDouble() < 0.6) {
+      // Place it somewhere along the hole trail.
+      final t = rng.nextDouble();
+      final hl = _holeLayout[h];
+      hits.add(_lerp(hl[0], hl[1], hl[2], hl[3], t));
+    }
+  }
+
+  return hits;
+}
+
 /// Build shots for a hole. Each shot walks along the tee→pin line.
 List<Shot> _buildShots(int holeIdx, int score) {
   final h = _holeLayout[holeIdx];
@@ -165,12 +212,11 @@ Future<void> seedKaroriRounds(AppDatabase db) async {
 
   for (int r = 0; r < _rounds.length; r++) {
     final scores = _rounds[r];
-    final holePlays = List.generate(18, (i) {
-      return HolePlay(
-        holeNumber: i + 1,
-        shots: _buildShots(i, scores[i]),
-      );
-    });
+    final holeShots = List.generate(18, (i) => _buildShots(i, scores[i]));
+    final holePlays = List.generate(18, (i) => HolePlay(
+      holeNumber: i + 1,
+      shots: holeShots[i],
+    ));
 
     final round = Round(
       player: Player(name: 'Rick'),
@@ -178,6 +224,7 @@ Future<void> seedKaroriRounds(AppDatabase db) async {
       date: _dates[r],
       holePlays: holePlays,
       trail: _buildRoundTrail(r),
+      hitPositions: _buildHitPositions(r, holeShots),
       status: 'completed',
     );
 
