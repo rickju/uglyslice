@@ -82,6 +82,7 @@ class _RoundPageState extends State<RoundPage> {
       _breadcrumb.addAll(_round!.trail);
       _isLoading = false;
     });
+    if (review != null) _initCommittedPositionsForHole();
     debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');
 
     if (review == null) _determinePosition();
@@ -285,9 +286,9 @@ class _RoundPageState extends State<RoundPage> {
                   if (_breadcrumb.length >= 2)
                     Polyline(
                       points: _breadcrumb,
-                      color: Colors.cyan.withValues(alpha: 0.85),
-                      strokeWidth: 3,
-                      pattern: StrokePattern.dashed(segments: const [10, 6]),
+                      color: Colors.cyan.withValues(alpha: 0.6),
+                      strokeWidth: 2,
+                      pattern: StrokePattern.dashed(segments: const [6, 12]),
                     ),
                   // --- parabolic shot arcs for current hole (review mode) ---
                   if (widget.reviewRound != null)
@@ -357,11 +358,7 @@ class _RoundPageState extends State<RoundPage> {
                               setState(() => _selectedTee = pos);
                               _fitMapToHole();
                             },
-                            child: Icon(
-                              Icons.location_on,
-                              color: _selectedTee == pos ? Colors.purple : Colors.orange,
-                              size: 30,
-                            ),
+                            child: const SizedBox.shrink(),
                           ),
                         ),
                     ],
@@ -504,9 +501,7 @@ class _RoundPageState extends State<RoundPage> {
                         setState(() {
                           _currentHoleIndex = (_currentHoleIndex - 1 + total) % total;
                           _selectedTee = null;
-                          _draggedShotPositions.clear();
-                          _committedShotPositions.clear();
-                          _draggingShotIdx = null;
+                          _initCommittedPositionsForHole();
                         });
                         _fitMapToHoleView(_currentHoleIndex);
                       },
@@ -544,9 +539,7 @@ class _RoundPageState extends State<RoundPage> {
                         setState(() {
                           _currentHoleIndex = (_currentHoleIndex + 1) % total;
                           _selectedTee = null;
-                          _draggedShotPositions.clear();
-                          _committedShotPositions.clear();
-                          _draggingShotIdx = null;
+                          _initCommittedPositionsForHole();
                         });
                         _fitMapToHoleView(_currentHoleIndex);
                       },
@@ -728,17 +721,34 @@ class _RoundPageState extends State<RoundPage> {
     ];
   }
 
+  /// Seed _committedShotPositions from the current hole's shot starts so that
+  /// arcs and markers share the exact same LatLng objects from the first render,
+  /// avoiding floating-point drift from the JSON round-trip.
+  void _initCommittedPositionsForHole() {
+    _committedShotPositions.clear();
+    _draggedShotPositions.clear();
+    _draggingShotIdx = null;
+    final shots = _currentHoleShots();
+    for (int i = 0; i < shots.length; i++) {
+      _committedShotPositions[i] = shots[i].startLocation;
+    }
+  }
+
   void _onShotDragUpdate(int shotIdx, DragUpdateDetails details) {
     final shots = _currentHoleShots();
     if (shotIdx >= shots.length) return;
     final currentPos =
         _draggedShotPositions[shotIdx] ?? shots[shotIdx].startLocation;
     final camera = _mapController.camera;
-    final screenOffset = camera.latLngToScreenOffset(currentPos);
-    final newOffset = screenOffset + details.delta;
+    // Markers live inside MobileLayerTransformer (Transform.rotate).
+    // Flutter's hit-test inverse means details.delta is already in the
+    // pre-rotation Stack space, which is world-pixel space (east=+x, south=+y).
+    // No rotation correction needed — just offset the world pixel position.
+    final worldPx = camera.projectAtZoom(currentPos);
     setState(() {
       _draggingShotIdx = shotIdx;
-      _draggedShotPositions[shotIdx] = camera.screenOffsetToLatLng(newOffset);
+      _draggedShotPositions[shotIdx] =
+          camera.unprojectAtZoom(worldPx + details.delta);
     });
   }
 
