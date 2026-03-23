@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:equatable/equatable.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:syncable/syncable.dart';
 import 'package:ugly_slice_shared/player.dart';
 import 'package:ugly_slice_shared/round_data.dart';
@@ -28,6 +29,7 @@ class Round extends Equatable implements Syncable {
   final DateTime date;
   final List<HolePlay> holePlays;
   final String status;
+  final List<LatLng> trail;
 
   Round({
     String? id,
@@ -39,6 +41,7 @@ class Round extends Equatable implements Syncable {
     required this.date,
     this.holePlays = const [],
     this.status = 'in_progress',
+    this.trail = const [],
   })  : id = id ?? const Uuid().v4(),
         updatedAt = updatedAt ?? DateTime.now().toUtc();
 
@@ -69,6 +72,9 @@ class Round extends Equatable implements Syncable {
       holePlays: (decoded['holePlays'] as List? ?? [])
           .map((hp) => HolePlay.fromMap(hp as Map<String, dynamic>))
           .toList(),
+      trail: (decoded['trail'] as List? ?? [])
+          .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
+          .toList(),
     );
   }
 
@@ -93,8 +99,10 @@ class Round extends Equatable implements Syncable {
         'course_name': course.name,
         'date': date.toUtc().toIso8601String(),
         'status': status,
-        'data': jsonEncode(
-            {'holePlays': holePlays.map((hp) => hp.toMap()).toList()}),
+        'data': jsonEncode({
+          'holePlays': holePlays.map((hp) => hp.toMap()).toList(),
+          'trail': trail.map((p) => [p.latitude, p.longitude]).toList(),
+        }),
       };
 
   static Round fromJson(Map<String, dynamic> json) {
@@ -118,6 +126,9 @@ class Round extends Equatable implements Syncable {
       holePlays: (data['holePlays'] as List? ?? [])
           .map((hp) => HolePlay.fromMap(hp as Map<String, dynamic>))
           .toList(),
+      trail: (data['trail'] as List? ?? [])
+          .map((p) => LatLng((p as List)[0] as double, (p)[1] as double))
+          .toList(),
     );
   }
 
@@ -139,6 +150,7 @@ class Round extends Equatable implements Syncable {
     DateTime? date,
     List<HolePlay>? holePlays,
     String? status,
+    List<LatLng>? trail,
   }) =>
       Round(
         id: id ?? this.id,
@@ -150,6 +162,7 @@ class Round extends Equatable implements Syncable {
         date: date ?? this.date,
         holePlays: holePlays ?? this.holePlays,
         status: status ?? this.status,
+        trail: trail ?? this.trail,
       );
 
   // ── Legacy (scorecard display) ───────────────────────────────────────────────
@@ -189,8 +202,10 @@ class _RoundCompanion extends UpdateCompanion<Syncable> {
 
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
-    final dataJson = jsonEncode(
-        {'holePlays': _r.holePlays.map((h) => h.toMap()).toList()});
+    final dataJson = jsonEncode({
+      'holePlays': _r.holePlays.map((h) => h.toMap()).toList(),
+      'trail': _r.trail.map((p) => [p.latitude, p.longitude]).toList(),
+    });
     // Variable<String> constructor accepts String? — null becomes SQL NULL
     final map = <String, Expression>{
       'id': Variable<String>(_r.id),

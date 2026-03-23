@@ -7,14 +7,23 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'models/course.dart';
 import 'services/course_repository.dart';
+import 'services/round_repository.dart';
+import 'round_scorecard_page.dart';
 import 'main.dart' show db;
 
 // page widget
 class RoundPage extends StatefulWidget {
   final String courseId;
   final String courseName;
+  /// Non-null when opening an existing round for review/editing.
+  final Round? reviewRound;
 
-  const RoundPage({super.key, required this.courseId, required this.courseName});
+  const RoundPage({
+    super.key,
+    required this.courseId,
+    required this.courseName,
+    this.reviewRound,
+  });
 
   @override
   State<RoundPage> createState() => _RoundPageState();
@@ -32,6 +41,7 @@ class _RoundPageState extends State<RoundPage> {
   bool _isSatellite = true;
   final Map<int, int> _strokes = {}; // hole index → stroke count
   bool _strokeEditing = false;
+  final List<LatLng> _breadcrumb = [];
 
   String? _errorMessage;
   final MapController _mapController = MapController();
@@ -54,15 +64,33 @@ class _RoundPageState extends State<RoundPage> {
       return;
     }
 
-    final player = Player(name: 'Rick');
+    final review = widget.reviewRound;
     setState(() {
-      _round = Round(player: player, course: golfCourse, date: DateTime.now());
+      if (review != null) {
+        _round = review.copyWith(course: golfCourse);
+        for (int i = 0; i < review.holePlays.length; i++) {
+          _strokes[i] = review.holePlays[i].score;
+        }
+      } else {
+        _round = Round(
+            player: Player(name: 'Rick'), course: golfCourse, date: DateTime.now());
+      }
+      _breadcrumb.addAll(_round!.trail);
       _isLoading = false;
     });
     debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');
-    _determinePosition();
+
+    if (review == null) _determinePosition();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_round!.course.holes.isNotEmpty) _fitMapToHoleView(0);
+      if (_breadcrumb.length >= 2) {
+        _mapController.fitCamera(CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(_breadcrumb),
+          padding: const EdgeInsets.all(50),
+        ));
+      } else if (_round!.course.holes.isNotEmpty) {
+        _fitMapToHoleView(0);
+      }
     });
   } // _loadCourse
 
@@ -90,6 +118,7 @@ class _RoundPageState extends State<RoundPage> {
         debugPrint('new pos: $newPos.toString()');
         setState(() {
           _currentPlayerPos = newPos;
+          _breadcrumb.add(newPos);
         });
 
         if (_round != null && _round!.course.holes.isNotEmpty) {
@@ -106,6 +135,8 @@ class _RoundPageState extends State<RoundPage> {
 
         if (firstHole.teeBoxes.isNotEmpty) {
           fallbackPosition = firstHole.teeBoxes[0].position;
+        } else if (firstHole.routingLine.isNotEmpty) {
+          fallbackPosition = firstHole.routingLine.first;
         } else {
           fallbackPosition = firstHole.pin;
         }
@@ -158,7 +189,11 @@ class _RoundPageState extends State<RoundPage> {
 
       // Front = green polygon point closest to player
       // Back  = green polygon point farthest from player
-      final greenPoints = hole.greens.expand((g) => g.points).toList();
+      // Filter to points within 60m of pin to exclude outlier polygon nodes.
+      final greenPoints = hole.greens
+          .expand((g) => g.points)
+          .where((pt) => dist.as(LengthUnit.Meter, hole.pin, pt) < 60)
+          .toList();
       if (greenPoints.isNotEmpty) {
         double minM = double.infinity, maxM = 0;
         for (final pt in greenPoints) {
@@ -236,6 +271,13 @@ class _RoundPageState extends State<RoundPage> {
                       color: Colors.white.withValues(alpha: 0.7),
                       strokeWidth: 2,
                       pattern: StrokePattern.dashed(segments: const [12, 6]),
+                    ),
+                  // --- GPS breadcrumb trail ---
+                  if (_breadcrumb.length >= 2)
+                    Polyline(
+                      points: _breadcrumb,
+                      color: Colors.cyan.withValues(alpha: 0.85),
+                      strokeWidth: 3,
                     ),
                 ],
               ),
@@ -338,7 +380,8 @@ class _RoundPageState extends State<RoundPage> {
               ),
             ),
           ),
-          // --- distance badge: top-right ---
+          // --- distance badge: top-right (play mode only) ---
+          if (widget.reviewRound == null)
           Positioned(
             top: 10,
             right: 16,
@@ -355,11 +398,11 @@ class _RoundPageState extends State<RoundPage> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (distFront != null)
-                          _DistRow(label: 'F', value: distFront!, color: Colors.white70),
-                        _DistRow(label: 'P', value: distPin ?? 0, color: Colors.greenAccent),
                         if (distBack != null)
                           _DistRow(label: 'B', value: distBack!, color: Colors.white70),
+                        _DistRow(label: 'P', value: distPin ?? 0, color: Colors.greenAccent),
+                        if (distFront != null)
+                          _DistRow(label: 'F', value: distFront!, color: Colors.white70),
                       ],
                     ),
             ),
@@ -516,11 +559,38 @@ class _RoundPageState extends State<RoundPage> {
               leading: const Icon(Icons.exit_to_app, color: Colors.white),
               title: const Text('Exit to main page',
                   style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context); // close sheet
-                Navigator.pop(context); // exit round page
+              onTap: () async {
+                if (_round != null) {
+                  final isReview = widget.reviewRound != null;
+                  final updated = _round!.copyWith(
+                    trail: isReview
+                        ? _round!.trail
+                        : List.unmodifiable(_breadcrumb),
+                    holePlays: _buildHolePlaysFromStrokes(),
+                  );
+                  await RoundRepository(db).updateRound(_round!.id, updated);
+                }
+                if (context.mounted) {
+                  Navigator.pop(context); // close sheet
+                  Navigator.pop(context); // exit round page
+                }
               },
             ),
+            if (widget.reviewRound != null && _round != null)
+              ListTile(
+                leading: const Icon(Icons.table_rows, color: Colors.white),
+                title: const Text('View scorecard',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => RoundScorecardPage(round: _round!),
+                    ),
+                  );
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.sports_golf, color: Colors.white),
               title: const Text('Manage clubs',
@@ -534,6 +604,38 @@ class _RoundPageState extends State<RoundPage> {
         ),
       ),
     );
+  }
+
+  /// Rebuild holePlays from the stroke counter, preserving existing shot data.
+  List<HolePlay> _buildHolePlaysFromStrokes() {
+    if (_round == null) return [];
+    final holeCount = _round!.course.holes.isNotEmpty
+        ? _round!.course.holes.length
+        : (_strokes.keys.isEmpty ? 0 : _strokes.keys.reduce((a, b) => a > b ? a : b) + 1);
+    return List.generate(holeCount, (i) {
+      final holeNum = i + 1;
+      final target = _strokes[i] ?? 0;
+      final existing =
+          _round!.holePlays.where((hp) => hp.holeNumber == holeNum).firstOrNull;
+      if (target == 0) return existing ?? HolePlay(holeNumber: holeNum, shots: []);
+      final shots = existing?.shots ?? [];
+      if (shots.length == target) return existing!;
+      if (shots.length > target) {
+        return HolePlay(holeNumber: holeNum, shots: shots.sublist(0, target));
+      }
+      final base = shots.isNotEmpty ? shots.last : null;
+      final extra = List.generate(
+        target - shots.length,
+        (_) => Shot(
+          startLocation: base?.endLocation ?? base?.startLocation ??
+              _currentPlayerPos ?? const LatLng(0, 0),
+          club: base?.club ??
+              Club(name: 'Unknown', brand: '', number: '?', type: ClubType.iron, loft: 30),
+          lieType: LieType.fairway,
+        ),
+      );
+      return HolePlay(holeNumber: holeNum, shots: [...shots, ...extra]);
+    });
   }
 
   Color _getColorForFeature(String? featureType) {

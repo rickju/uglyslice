@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'main.dart' show db;
 import 'models/round.dart';
 import 'services/round_repository.dart';
-import 'round_scorecard_page.dart';
+import 'round_page.dart';
 
 class RoundsListPage extends StatelessWidget {
   const RoundsListPage({super.key});
@@ -70,7 +70,13 @@ class _RoundTile extends StatelessWidget {
       ),
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => RoundScorecardPage(round: round)),
+        MaterialPageRoute(
+          builder: (_) => RoundPage(
+            courseId: round.course.id,
+            courseName: round.course.name,
+            reviewRound: round,
+          ),
+        ),
       ),
     );
   }

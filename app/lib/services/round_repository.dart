@@ -77,7 +77,11 @@ class RoundRepository {
         courseName: Value(r.course.name),
         date: Value(r.date),
         status: Value(r.status),
-        data: Value(jsonEncode(
-            {'holePlays': r.holePlays.map((h) => h.toMap()).toList()})),
+        data: Value(jsonEncode({
+          'holePlays': r.holePlays.map((h) => h.toMap()).toList(),
+          'trail': r.trail
+              .map((p) => [p.latitude, p.longitude])
+              .toList(),
+        })),
       );
 }
