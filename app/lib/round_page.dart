@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'models/course.dart';
 import 'services/course_repository.dart';
 import 'services/round_repository.dart';
+import 'services/watch_service.dart';
 import 'round_scorecard_page.dart';
 import 'main.dart' show db;
 
@@ -88,6 +89,9 @@ class _RoundPageState extends State<RoundPage> {
     debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');
 
     if (review == null) _determinePosition();
+
+    WatchService.instance.listen(onHit: recordHit);
+    _pushWatchContext();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_round!.course.holes.isNotEmpty) _fitMapToHoleView(0);
@@ -522,6 +526,7 @@ class _RoundPageState extends State<RoundPage> {
                           _initCommittedPositionsForHole();
                         });
                         _fitMapToHoleView(_currentHoleIndex);
+                        _pushWatchContext();
                       },
                     ),
                     GestureDetector(
@@ -560,6 +565,7 @@ class _RoundPageState extends State<RoundPage> {
                           _initCommittedPositionsForHole();
                         });
                         _fitMapToHoleView(_currentHoleIndex);
+                        _pushWatchContext();
                       },
                     ),
                   ],
@@ -810,6 +816,19 @@ class _RoundPageState extends State<RoundPage> {
   void recordHit() {
     if (_currentPlayerPos == null) return;
     setState(() => _hitPositions.add(_currentPlayerPos!));
+  }
+
+  void _pushWatchContext() {
+    if (_round == null || _round!.course.holes.isEmpty) return;
+    final hole = _round!.course.holes[_currentHoleIndex];
+    final dist = _currentPlayerPos != null
+        ? (const Distance().as(LengthUnit.Meter, _currentPlayerPos!, hole.pin) * 1.09361).round()
+        : 0;
+    WatchService.instance.sendContext(
+      holeNumber: hole.holeNumber,
+      par: hole.par,
+      distanceYards: dist,
+    );
   }
 
   void _showShotEditor(int shotIdx) {
