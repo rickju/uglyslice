@@ -42,6 +42,10 @@ class _RoundPageState extends State<RoundPage> {
   final Map<int, int> _strokes = {}; // hole index → stroke count
   bool _strokeEditing = false;
   final List<LatLng> _breadcrumb = [];
+  // shot position dragging (review mode)
+  int? _draggingShotIdx;
+  final Map<int, LatLng> _draggedShotPositions = {};   // live during drag
+  final Map<int, LatLng> _committedShotPositions = {}; // updates on release
 
   String? _errorMessage;
   final MapController _mapController = MapController();
@@ -215,6 +219,11 @@ class _RoundPageState extends State<RoundPage> {
             options: MapOptions(
               initialCenter: const LatLng(-41.2895, 174.6938),
               initialZoom: 16.0,
+              interactionOptions: InteractionOptions(
+                flags: _draggingShotIdx != null
+                    ? InteractiveFlag.none
+                    : InteractiveFlag.all,
+              ),
               onTap: (tapPosition, point) => setState(() {
                 _rulerTarget = point;
               }),
@@ -278,7 +287,23 @@ class _RoundPageState extends State<RoundPage> {
                       points: _breadcrumb,
                       color: Colors.cyan.withValues(alpha: 0.85),
                       strokeWidth: 3,
+                      pattern: StrokePattern.dashed(segments: const [10, 6]),
                     ),
+                  // --- parabolic shot arcs for current hole (review mode) ---
+                  if (widget.reviewRound != null)
+                    for (final (i, shot) in _currentHoleShots().indexed)
+                      if (shot.endLocation != null)
+                        Polyline(
+                          points: _arcPoints(
+                            _committedShotPositions[i] ?? shot.startLocation,
+                            // Shot i ends where shot i+1 starts — use the
+                            // committed position of i+1 if it was moved.
+                            _committedShotPositions[i + 1] ?? shot.endLocation!,
+                            i,
+                          ),
+                          color: Colors.greenAccent.withValues(alpha: 1.0),
+                          strokeWidth: 2,
+                        ),
                 ],
               ),
               if (_currentPlayerPos != null) // --- curr pos ---
@@ -358,6 +383,56 @@ class _RoundPageState extends State<RoundPage> {
                     ),
                   ],
                 ),
+              // --- shot distance labels (review mode) ---
+              if (widget.reviewRound != null)
+                MarkerLayer(
+                  markers: [
+                    for (final (i, shot) in _currentHoleShots().indexed)
+                      if (shot.endLocation != null)
+                        Marker(
+                          point: _arcMidpoint(
+                            _committedShotPositions[i] ?? shot.startLocation,
+                            _committedShotPositions[i + 1] ?? shot.endLocation!,
+                            i,
+                          ),
+                          width: 48,
+                          height: 20,
+                          child: _DistanceLabel(
+                            yards: (const Distance().as(
+                                      LengthUnit.Meter,
+                                      _committedShotPositions[i] ??
+                                          shot.startLocation,
+                                      _committedShotPositions[i + 1] ??
+                                          shot.endLocation!,
+                                    ) *
+                                    1.09361)
+                                .round(),
+                          ),
+                        ),
+                  ],
+                ),
+              // --- shot markers for current hole (review mode) ---
+              if (widget.reviewRound != null)
+                MarkerLayer(
+                  markers: [
+                    for (final (i, shot) in _currentHoleShots().indexed)
+                      Marker(
+                        point: _draggedShotPositions[i] ?? shot.startLocation,
+                        width: 28,
+                        height: 28,
+                        child: GestureDetector(
+                          onPanStart: (_) =>
+                              setState(() => _draggingShotIdx = i),
+                          onPanUpdate: (d) => _onShotDragUpdate(i, d),
+                          onPanEnd: (_) => _onShotDragEnd(),
+                          child: _ShotMarker(
+                            label: _clubLabel(shot.club),
+                            dragging: _draggingShotIdx == i,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
             ],
           ),
           // --- satellite toggle: top-left ---
@@ -429,6 +504,9 @@ class _RoundPageState extends State<RoundPage> {
                         setState(() {
                           _currentHoleIndex = (_currentHoleIndex - 1 + total) % total;
                           _selectedTee = null;
+                          _draggedShotPositions.clear();
+                          _committedShotPositions.clear();
+                          _draggingShotIdx = null;
                         });
                         _fitMapToHoleView(_currentHoleIndex);
                       },
@@ -466,6 +544,9 @@ class _RoundPageState extends State<RoundPage> {
                         setState(() {
                           _currentHoleIndex = (_currentHoleIndex + 1) % total;
                           _selectedTee = null;
+                          _draggedShotPositions.clear();
+                          _committedShotPositions.clear();
+                          _draggingShotIdx = null;
                         });
                         _fitMapToHoleView(_currentHoleIndex);
                       },
@@ -606,6 +687,113 @@ class _RoundPageState extends State<RoundPage> {
     );
   }
 
+  /// LatLng at the peak (t=0.5) of the shot arc bezier.
+  LatLng _arcMidpoint(LatLng start, LatLng end, int idx) {
+    final dlat = end.latitude - start.latitude;
+    final dlon = end.longitude - start.longitude;
+    final sign = idx.isEven ? 1.0 : -1.0;
+    final perpLat = -dlon * 0.20 * sign;
+    final perpLon = dlat * 0.20 * sign;
+    final ctrlLat = (start.latitude + end.latitude) / 2 + perpLat;
+    final ctrlLon = (start.longitude + end.longitude) / 2 + perpLon;
+    return LatLng(
+      0.25 * start.latitude + 0.5 * ctrlLat + 0.25 * end.latitude,
+      0.25 * start.longitude + 0.5 * ctrlLon + 0.25 * end.longitude,
+    );
+  }
+
+  /// Quadratic bezier arc between [start] and [end].
+  /// Control point is offset 8% of chord length perpendicular to the line,
+  /// alternating sides per shot index to avoid overlapping chips/putts.
+  List<LatLng> _arcPoints(LatLng start, LatLng end, int idx,
+      {int steps = 14}) {
+    final dlat = end.latitude - start.latitude;
+    final dlon = end.longitude - start.longitude;
+    final sign = idx.isEven ? 1.0 : -1.0;
+    // Perpendicular to chord, scaled to 8% of chord length
+    final perpLat = -dlon * 0.20 * sign;
+    final perpLon = dlat * 0.20 * sign;
+    final ctrlLat = (start.latitude + end.latitude) / 2 + perpLat;
+    final ctrlLon = (start.longitude + end.longitude) / 2 + perpLon;
+    return [
+      for (int i = 0; i <= steps; i++)
+        () {
+          final t = i / steps;
+          final mt = 1 - t;
+          return LatLng(
+            mt * mt * start.latitude + 2 * mt * t * ctrlLat + t * t * end.latitude,
+            mt * mt * start.longitude + 2 * mt * t * ctrlLon + t * t * end.longitude,
+          );
+        }(),
+    ];
+  }
+
+  void _onShotDragUpdate(int shotIdx, DragUpdateDetails details) {
+    final shots = _currentHoleShots();
+    if (shotIdx >= shots.length) return;
+    final currentPos =
+        _draggedShotPositions[shotIdx] ?? shots[shotIdx].startLocation;
+    final camera = _mapController.camera;
+    final screenOffset = camera.latLngToScreenOffset(currentPos);
+    final newOffset = screenOffset + details.delta;
+    setState(() {
+      _draggingShotIdx = shotIdx;
+      _draggedShotPositions[shotIdx] = camera.screenOffsetToLatLng(newOffset);
+    });
+  }
+
+  void _onShotDragEnd() {
+    if (_round == null || _draggedShotPositions.isEmpty) {
+      setState(() => _draggingShotIdx = null);
+      return;
+    }
+    final holeNum = _currentHoleIndex + 1;
+    final updatedHolePlays = _round!.holePlays.map((hp) {
+      if (hp.holeNumber != holeNum) return hp;
+      final shots = List.generate(hp.shots.length, (i) {
+        final newPos = _draggedShotPositions[i];
+        if (newPos == null) return hp.shots[i];
+        final s = hp.shots[i];
+        return Shot(
+            startLocation: newPos,
+            endLocation: s.endLocation,
+            club: s.club,
+            lieType: s.lieType);
+      });
+      return HolePlay(holeNumber: holeNum, shots: shots);
+    }).toList();
+    setState(() {
+      _round = _round!.copyWith(holePlays: updatedHolePlays);
+      _committedShotPositions.addAll(_draggedShotPositions);
+      _draggingShotIdx = null;
+    });
+    RoundRepository(db).updateRound(_round!.id, _round!);
+  }
+
+  List<Shot> _currentHoleShots() {
+    if (_round == null) return [];
+    final holeNum = _currentHoleIndex + 1;
+    return _round!.holePlays
+        .where((hp) => hp.holeNumber == holeNum)
+        .expand((hp) => hp.shots)
+        .toList();
+  }
+
+  String _clubLabel(Club club) {
+    switch (club.type) {
+      case ClubType.driver:
+        return 'D';
+      case ClubType.wood:
+        return 'W${club.number}';
+      case ClubType.hybrid:
+        return 'H${club.number}';
+      case ClubType.putter:
+        return 'P';
+      default:
+        return club.number.isNotEmpty ? '${club.number}i' : '?';
+    }
+  }
+
   /// Rebuild holePlays from the stroke counter, preserving existing shot data.
   List<HolePlay> _buildHolePlaysFromStrokes() {
     if (_round == null) return [];
@@ -736,6 +924,64 @@ class _DistRow extends StatelessWidget {
         Text('yds',
             style: TextStyle(color: color.withValues(alpha: 0.6), fontSize: 11)),
       ],
+    );
+  }
+}
+
+class _ShotMarker extends StatelessWidget {
+  final String label;
+  final bool dragging;
+
+  const _ShotMarker({required this.label, this.dragging = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = dragging ? Colors.white : Colors.yellow;
+    final borderWidth = dragging ? 2.5 : 1.5;
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: dragging ? Colors.yellow.withValues(alpha: 0.25) : Colors.black87,
+        shape: BoxShape.circle,
+        border: Border.all(color: borderColor, width: borderWidth),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.yellow,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DistanceLabel extends StatelessWidget {
+  final int yards;
+
+  const _DistanceLabel({required this.yards});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '$yards y',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.greenAccent,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
