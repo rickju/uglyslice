@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:latlong2/latlong.dart';
 
 import 'database/app_database.dart';
@@ -7,6 +9,29 @@ import 'services/round_repository.dart';
 
 // Karori Golf Club hole pars (hole 12 missing tag → treated as par 4)
 const _karoriPars = [4, 3, 4, 3, 4, 3, 5, 4, 4, 4, 4, 4, 3, 5, 4, 4, 4, 4];
+
+// Hole layout from OSM routing lines: [teeLat, teeLon, pinLat, pinLon]
+// Source: karori_1.json routing-line first/last nodes
+const _holeLayout = [
+  [-41.28807, 174.68872, -41.28555, 174.69028], // H1  par4
+  [-41.28532, 174.69103, -41.28514, 174.68885], // H2  par3
+  [-41.28552, 174.68944, -41.28646, 174.68600], // H3  par4
+  [-41.28693, 174.68632, -41.28704, 174.68807], // H4  par3
+  [-41.28731, 174.68830, -41.28787, 174.68430], // H5  par4
+  [-41.28773, 174.68392, -41.28774, 174.68249], // H6  par3
+  [-41.28837, 174.68374, -41.28783, 174.68798], // H7  par5
+  [-41.28840, 174.68818, -41.28908, 174.68421], // H8  par4
+  [-41.28968, 174.68392, -41.28952, 174.68869], // H9  par4
+  [-41.29022, 174.68811, -41.29025, 174.68426], // H10 par4
+  [-41.29066, 174.68395, -41.29241, 174.68153], // H11 par4
+  [-41.29356, 174.68299, -41.29437, 174.68585], // H12 par4
+  [-41.29439, 174.68652, -41.29313, 174.68693], // H13 par3
+  [-41.29269, 174.68733, -41.29292, 174.68269], // H14 par5
+  [-41.29263, 174.68188, -41.29236, 174.68696], // H15 par4
+  [-41.29170, 174.68747, -41.29165, 174.68373], // H16 par4
+  [-41.29112, 174.68401, -41.29121, 174.68754], // H17 par4
+  [-41.29127, 174.68823, -41.28856, 174.68888], // H18 par4
+];
 
 // Three realistic rounds (scores per hole, index 0 = hole 1)
 const _rounds = [
@@ -24,8 +49,6 @@ final _dates = [
   DateTime.now().subtract(const Duration(days: 34)),
 ];
 
-// Dummy tee location (Karori hole 1 tee)
-final _tee = LatLng(-41.2855, 174.6894);
 final _dummyClub = Club(
     name: '7 Iron',
     brand: 'TaylorMade',
@@ -33,23 +56,118 @@ final _dummyClub = Club(
     type: ClubType.iron,
     loft: 34);
 
+final _driver = Club(
+    name: 'Driver',
+    brand: 'TaylorMade',
+    number: '1',
+    type: ClubType.wood,
+    loft: 10);
+
+final _putter = Club(
+    name: 'Putter',
+    brand: 'Odyssey',
+    number: 'P',
+    type: ClubType.putter,
+    loft: 4);
+
+/// Interpolate between two coordinates at fraction [t] ∈ [0,1].
+LatLng _lerp(double lat1, double lon1, double lat2, double lon2, double t) =>
+    LatLng(lat1 + (lat2 - lat1) * t, lon1 + (lon2 - lon1) * t);
+
+/// Generate a GPS trail for one hole with [steps] breadcrumb points.
+/// A sine-wave lateral scatter is added to simulate realistic play.
+List<LatLng> _holeTrail(int holeIdx, int roundIdx, {int steps = 8}) {
+  final h = _holeLayout[holeIdx];
+  final teeLat = h[0], teeLon = h[1], pinLat = h[2], pinLon = h[3];
+
+  final dlat = pinLat - teeLat;
+  final dlon = pinLon - teeLon;
+  final len = sqrt(dlat * dlat + dlon * dlon);
+  // Unit perpendicular (rotated 90°)
+  final perpLat = len > 0 ? -dlon / len : 0.0;
+  final perpLon = len > 0 ? dlat / len : 0.0;
+  // Scatter amplitude ~15 m in degrees (≈ 0.000135°/m)
+  final amp = 0.0020 * (0.5 + (roundIdx + holeIdx) % 3 * 0.25);
+  final phase = (roundIdx * 7 + holeIdx * 3) * 0.4;
+
+  return [
+    for (int i = 0; i <= steps; i++)
+      () {
+        final t = i / steps;
+        final base = _lerp(teeLat, teeLon, pinLat, pinLon, t);
+        final scatter = sin(t * pi * 3 + phase) * amp;
+        return LatLng(base.latitude + perpLat * scatter,
+            base.longitude + perpLon * scatter);
+      }(),
+  ];
+}
+
+/// Build a full 18-hole GPS trail (tee→pin for each hole, joined together).
+List<LatLng> _buildRoundTrail(int roundIdx) {
+  final trail = <LatLng>[];
+  for (int h = 0; h < 18; h++) {
+    trail.addAll(_holeTrail(h, roundIdx));
+  }
+  return trail;
+}
+
+/// Build shots for a hole. Each shot walks along the tee→pin line.
+List<Shot> _buildShots(int holeIdx, int score) {
+  final h = _holeLayout[holeIdx];
+  final teeLat = h[0], teeLon = h[1], pinLat = h[2], pinLon = h[3];
+
+  if (score == 1) {
+    return [
+      Shot(
+        startLocation: LatLng(teeLat, teeLon),
+        endLocation: LatLng(pinLat, pinLon),
+        club: _dummyClub,
+        lieType: LieType.fairway,
+      ),
+    ];
+  }
+
+  final shots = <Shot>[];
+  // Divide hole into (score-1) approach segments, last shot is a putt to pin.
+  // Breakpoints: 0, 1/(score-1), 2/(score-1), ..., 1
+  for (int k = 0; k < score; k++) {
+    final startT = k == 0 ? 0.0 : k / (score - 1);
+    final endT = k == score - 1 ? 1.0 : (k + 1) / (score - 1);
+    final start = _lerp(teeLat, teeLon, pinLat, pinLon, startT.clamp(0, 1));
+    final end = _lerp(teeLat, teeLon, pinLat, pinLon, endT.clamp(0, 1));
+    final Club club;
+    final LieType lie;
+    if (k == 0) {
+      club = _driver;
+      lie = LieType.fairway;
+    } else if (k == score - 1) {
+      club = _putter;
+      lie = LieType.green;
+    } else {
+      club = _dummyClub;
+      lie = LieType.fairway;
+    }
+    shots.add(Shot(
+      startLocation: start,
+      endLocation: end,
+      club: club,
+      lieType: lie,
+    ));
+  }
+  return shots;
+}
+
 Future<void> seedKaroriRounds(AppDatabase db) async {
   final repo = RoundRepository(db);
-  final course = Course.stub(
-      id: 'course_747473941', name: 'Karori Golf Club');
+  final course = Course.stub(id: 'course_747473941', name: 'Karori Golf Club');
 
   for (int r = 0; r < _rounds.length; r++) {
     final scores = _rounds[r];
     final holePlays = List.generate(18, (i) {
-      final shots = List.generate(
-        scores[i],
-        (_) => Shot(
-          startLocation: _tee,
-          club: _dummyClub,
-          lieType: LieType.fairway,
-        ),
+      return HolePlay(
+        holeNumber: i + 1,
+        shots: _buildShots(i, scores[i]),
       );
-      return HolePlay(holeNumber: i + 1, shots: shots);
     });
 
     final round = Round(
@@ -57,6 +175,7 @@ Future<void> seedKaroriRounds(AppDatabase db) async {
       course: course,
       date: _dates[r],
       holePlays: holePlays,
+      trail: _buildRoundTrail(r),
       status: 'completed',
     );
 
