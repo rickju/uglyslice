@@ -128,32 +128,42 @@ LatLng _jitter(LatLng p, int seed) {
 /// For each real shot: the watch records 1 hit (sometimes 2 if a practice
 /// swing was taken). Putts are excluded — phone/watch rarely detects them.
 /// A few false-positive detections are scattered along the trail at random.
+/// All positions are taken from the actual trail (not the straight tee→pin
+/// line) so they sit on the path the player walked.
 List<LatLng> _buildHitPositions(int roundIdx, List<List<Shot>> holeShots) {
+  const steps = 8; // must match _holeTrail steps
   final hits = <LatLng>[];
   final rng = Random(roundIdx * 31);
 
   for (int h = 0; h < holeShots.length; h++) {
     final shots = holeShots[h];
-    for (int k = 0; k < shots.length; k++) {
+    final trail = _holeTrail(h, roundIdx, steps: steps); // 9 points
+
+    final score = shots.length;
+
+    for (int k = 0; k < score; k++) {
       final shot = shots[k];
       // Skip putts — watch rarely triggers on putting stroke.
       if (shot.club?.type == ClubType.putter) continue;
 
-      // Real hit — slightly jittered from the shot start position.
-      hits.add(_jitter(shot.startLocation, roundIdx * 1000 + h * 100 + k));
+      // Map shot fraction → trail index (same t as _buildShots uses).
+      final t = score <= 1 ? 0.0 : k / (score - 1).toDouble();
+      final trailIdx = (t * steps).round().clamp(0, steps);
+      final base = trail[trailIdx];
 
-      // ~35% chance of a practice swing (extra hit) before this shot.
+      // Real hit — slightly jittered from the trail point.
+      hits.add(_jitter(base, roundIdx * 1000 + h * 100 + k));
+
+      // ~35% chance of a practice swing just before this shot.
       if (rng.nextDouble() < 0.35) {
-        hits.add(_jitter(shot.startLocation, roundIdx * 999 + h * 97 + k + 50));
+        hits.add(_jitter(base, roundIdx * 999 + h * 97 + k + 50));
       }
     }
 
-    // ~1 false positive per hole (watch detected a non-swing movement).
+    // ~1 false positive per hole — random trail point, not the straight line.
     if (shots.isNotEmpty && rng.nextDouble() < 0.6) {
-      // Place it somewhere along the hole trail.
-      final t = rng.nextDouble();
-      final hl = _holeLayout[h];
-      hits.add(_lerp(hl[0], hl[1], hl[2], hl[3], t));
+      final trailIdx = rng.nextInt(trail.length);
+      hits.add(_jitter(trail[trailIdx], roundIdx * 777 + h * 13));
     }
   }
 
