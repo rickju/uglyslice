@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 
 import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
@@ -51,7 +52,7 @@ class CourseListRepository {
       return dlat * dlat + dlon * dlon;
     }
 
-    return courses..sort((a, b) {
+    final sorted = courses..sort((a, b) {
       final pa = priority(a);
       final pb = priority(b);
       if (pa != pb) return pa.compareTo(pb);
@@ -59,6 +60,8 @@ class CourseListRepository {
       if (lat != null) return dist(a).compareTo(dist(b));
       return a.name.compareTo(b.name);
     });
+    debugPrint('_sorted: lat=$lat lon=$lon recent=${recent.length} top3=${sorted.take(3).map((c) => c.name).join(', ')}');
+    return sorted;
   }
 }
 
