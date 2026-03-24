@@ -41,9 +41,9 @@ class _RoundPageState extends State<RoundPage> {
   LatLng? _rulerTarget;
   bool _isSatellite = true;
   final Map<int, int> _strokes = {}; // hole index → stroke count
-  bool _strokeEditing = false;
   final List<LatLng> _breadcrumb = [];
-  final List<LatLng> _hitPositions = [];
+  // hole index → list of GPS positions where swings were detected on that hole
+  final Map<int, List<LatLng>> _hitPositions = {};
   // shot position dragging (review mode)
   int? _draggingShotIdx;
   final Map<int, LatLng> _draggedShotPositions = {};   // live during drag
@@ -82,10 +82,17 @@ class _RoundPageState extends State<RoundPage> {
             player: Player(name: 'Rick'), course: golfCourse, date: DateTime.now());
       }
       _breadcrumb.addAll(_round!.trail);
-      _hitPositions.addAll(_round!.hitPositions);
+      // Hit positions from saved rounds are display-only; loaded as flat list
+      // into hole 0 bucket so they still render on the map.
+      if (_round!.hitPositions.isNotEmpty) {
+        _hitPositions[0] = List.of(_round!.hitPositions);
+      }
       _isLoading = false;
     });
     if (review != null) _initCommittedPositionsForHole();
+    // Persist new play round immediately so it appears in the scorecard list
+    // and updateRound on exit has a row to update.
+    if (review == null) await RoundRepository(db).saveRound(_round!);
     debugPrint('Holes loaded for ${widget.courseName}: ${_round!.course.holes.length}');
 
     if (review == null) _determinePosition();
@@ -295,10 +302,10 @@ class _RoundPageState extends State<RoundPage> {
                       strokeWidth: 2,
                       pattern: StrokePattern.dashed(segments: const [6, 12]),
                     ),
-                  // --- parabolic shot arcs for current hole (review mode) ---
-                  if (widget.reviewRound != null)
-                    for (final (i, shot) in _currentHoleShots().indexed)
-                      if (shot.endLocation != null)
+                  // --- parabolic shot arcs for current hole ---
+                  for (final (i, shot) in _currentHoleShots().indexed)
+                      if (shot.endLocation != null &&
+                          (shot.startLocation.latitude != 0 || shot.startLocation.longitude != 0))
                         Polyline(
                           points: _arcPoints(
                             _committedShotPositions[i] ?? shot.startLocation,
@@ -385,12 +392,12 @@ class _RoundPageState extends State<RoundPage> {
                     ),
                   ],
                 ),
-              // --- shot distance labels (review mode) ---
-              if (widget.reviewRound != null)
-                MarkerLayer(
+              // --- shot distance labels ---
+              MarkerLayer(
                   markers: [
                     for (final (i, shot) in _currentHoleShots().indexed)
-                      if (shot.endLocation != null)
+                      if (shot.endLocation != null &&
+                          (shot.startLocation.latitude != 0 || shot.startLocation.longitude != 0))
                         Marker(
                           point: _arcMidpoint(
                             _committedShotPositions[i] ?? shot.startLocation,
@@ -417,7 +424,7 @@ class _RoundPageState extends State<RoundPage> {
               if (_hitPositions.isNotEmpty)
                 MarkerLayer(
                   markers: [
-                    for (final pos in _hitPositions)
+                    for (final pos in _hitPositions.values.expand((l) => l))
                       Marker(
                         point: pos,
                         width: 20,
@@ -426,11 +433,12 @@ class _RoundPageState extends State<RoundPage> {
                       ),
                   ],
                 ),
-              // --- shot markers for current hole (review mode) ---
-              if (widget.reviewRound != null)
-                MarkerLayer(
+              // --- shot markers for current hole ---
+              MarkerLayer(
                   markers: [
                     for (final (i, shot) in _currentHoleShots().indexed)
+                      if ((_draggedShotPositions[i] ?? shot.startLocation).latitude != 0 ||
+                          (_draggedShotPositions[i] ?? shot.startLocation).longitude != 0)
                       Marker(
                         point: _draggedShotPositions[i] ?? shot.startLocation,
                         width: 28,
@@ -516,126 +524,151 @@ class _RoundPageState extends State<RoundPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () {
-                        final total = _round!.course.holes.length;
-                        setState(() {
-                          _currentHoleIndex = (_currentHoleIndex - 1 + total) % total;
-                          _selectedTee = null;
-                          _initCommittedPositionsForHole();
-                        });
-                        _fitMapToHoleView(_currentHoleIndex);
-                        _pushWatchContext();
-                      },
-                    ),
-                    GestureDetector(
-                      onTap: () => _showHoleMenu(context),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          Text(
-                            'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () {
+                            _commitCurrentHole();
+                            final total = _round!.course.holes.length;
+                            setState(() {
+                              _currentHoleIndex = (_currentHoleIndex - 1 + total) % total;
+                              _selectedTee = null;
+                              _initCommittedPositionsForHole();
+                            });
+                            _fitMapToHoleView(_currentHoleIndex);
+                            _pushWatchContext();
+                          },
+                        ),
+                        GestureDetector(
+                          onTap: () => _showHoleMenu(context),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                'Hole ${_round!.course.holes[_currentHoleIndex].holeNumber}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Par ${_round!.course.holes[_currentHoleIndex].par}',
+                                style: const TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Par ${_round!.course.holes[_currentHoleIndex].par}',
-                            style: const TextStyle(
-                              color: Colors.white60,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                          onPressed: () {
+                            _commitCurrentHole();
+                            final total = _round!.course.holes.length;
+                            setState(() {
+                              _currentHoleIndex = (_currentHoleIndex + 1) % total;
+                              _selectedTee = null;
+                              _initCommittedPositionsForHole();
+                            });
+                            _fitMapToHoleView(_currentHoleIndex);
+                            _pushWatchContext();
+                          },
+                        ),
+                      ],
+                ),
+              ),
+            ),
+          // --- stroke bar: above hole nav ---
+          if (_round!.course.holes.isNotEmpty)
+            Positioned(
+              bottom: 90,
+              right: 16,
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.5,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Row(
+                  children: [
+                    // --- club sequence (scrollable, fills remaining space) ---
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          children: [
+                            for (final (i, entry) in _clubSequence().indexed) ...[
+                              if (i > 0)
+                                const Text('·',
+                                    style: TextStyle(color: Colors.white24, fontSize: 11)),
+                              GestureDetector(
+                                onTap: () => _showShotEditor(entry.$2),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                  child: Text(
+                                    entry.$1,
+                                    style: TextStyle(
+                                      color: entry.$1 == 'Pen'
+                                          ? Colors.redAccent
+                                          : entry.$1.endsWith('Pu')
+                                              ? Colors.greenAccent
+                                              : entry.$3
+                                                  ? Colors.white38
+                                                  : Colors.yellow,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
                     ),
+                    // --- divider ---
+                    Container(width: 1, height: 32, color: Colors.white12),
+                    // --- −/count/+ ---
                     IconButton(
-                      icon: const Icon(Icons.arrow_forward, color: Colors.white),
+                      icon: const Icon(Icons.remove, color: Colors.white),
                       onPressed: () {
-                        final total = _round!.course.holes.length;
                         setState(() {
-                          _currentHoleIndex = (_currentHoleIndex + 1) % total;
-                          _selectedTee = null;
-                          _initCommittedPositionsForHole();
+                          final par = _round!.course.holes[_currentHoleIndex].par;
+                          final cur = _strokes[_currentHoleIndex] ?? par;
+                          if (cur > 0) _strokes[_currentHoleIndex] = cur - 1;
                         });
-                        _fitMapToHoleView(_currentHoleIndex);
-                        _pushWatchContext();
+                        _commitCurrentHole();
+                      },
+                    ),
+                    Text(
+                      '${_strokes[_currentHoleIndex] ?? _round!.course.holes[_currentHoleIndex].par}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add, color: Colors.white),
+                      onPressed: () {
+                        setState(() {
+                          final par = _round!.course.holes[_currentHoleIndex].par;
+                          final cur = _strokes[_currentHoleIndex] ?? par;
+                          _strokes[_currentHoleIndex] = cur + 1;
+                        });
+                        _commitCurrentHole();
                       },
                     ),
                   ],
                 ),
               ),
             ),
-          // --- stroke editor: bottom-right, above hole nav ---
-          if (_round!.course.holes.isNotEmpty)
-            Positioned(
-              bottom: 90,
-              right: 16,
-              child: _strokeEditing
-                  ? Container(
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.remove, color: Colors.white),
-                            onPressed: () => setState(() {
-                              final cur = _strokes[_currentHoleIndex] ?? 0;
-                              if (cur > 0) _strokes[_currentHoleIndex] = cur - 1;
-                            }),
-                          ),
-                          Text(
-                            '${_strokes[_currentHoleIndex] ?? 0}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.add, color: Colors.white),
-                            onPressed: () => setState(() {
-                              final cur = _strokes[_currentHoleIndex] ?? 0;
-                              _strokes[_currentHoleIndex] = cur + 1;
-                            }),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.check, color: Colors.greenAccent),
-                            onPressed: () => setState(() => _strokeEditing = false),
-                          ),
-                        ],
-                      ),
-                    )
-                  : GestureDetector(
-                      onTap: () => setState(() => _strokeEditing = true),
-                      child: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Center(
-                          child: Text(
-                            '${_strokes[_currentHoleIndex] ?? 0}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ),
             ),
         ],
       ),
@@ -660,13 +693,16 @@ class _RoundPageState extends State<RoundPage> {
               onTap: () async {
                 if (_round != null) {
                   final isReview = widget.reviewRound != null;
+                  // Commit the current hole before building final holePlays.
+                  if (!isReview) _commitCurrentHole();
                   final updated = _round!.copyWith(
                     trail: isReview
                         ? _round!.trail
                         : List.unmodifiable(_breadcrumb),
                     hitPositions: isReview
                         ? _round!.hitPositions
-                        : List.unmodifiable(_hitPositions),
+                        : List.unmodifiable(
+                            _hitPositions.values.expand((l) => l).toList()),
                     holePlays: _buildHolePlaysFromStrokes(),
                   );
                   await RoundRepository(db).updateRound(_round!.id, updated);
@@ -761,6 +797,68 @@ class _RoundPageState extends State<RoundPage> {
     }
   }
 
+  /// Reconcile the current hole's stroke count into [_round!.holePlays].
+  ///
+  /// Called before navigating to another hole in play mode, so that past holes
+  /// carry real shot/club data when rendered just like in review mode.
+  void _commitCurrentHole() {
+    if (widget.reviewRound != null || _round == null) return;
+    final holeNum = _currentHoleIndex + 1;
+    // Only commit if the user has explicitly set a stroke count for this hole.
+    // Unvisited holes are handled by _buildHolePlaysFromStrokes on exit.
+    if (!_strokes.containsKey(_currentHoleIndex)) return;
+    final target = _strokes[_currentHoleIndex]!;
+    final existing = _round!.holePlays
+        .where((hp) => hp.holeNumber == holeNum)
+        .firstOrNull;
+    var shots = List<Shot>.from(existing?.shots ?? []);
+
+    if (shots.length > target) {
+      shots = shots.sublist(0, target);
+    } else {
+      // Use hit-detected positions (from Watch/manual) as shot locations.
+      // These are stored per-hole, so hits[k] corresponds to the k-th shot.
+      final hole = _round!.course.holes.isNotEmpty
+          ? _round!.course.holes[_currentHoleIndex]
+          : null;
+      final hitsForHole = _hitPositions[_currentHoleIndex] ?? [];
+      while (shots.length < target) {
+        final k = shots.length;
+        // Priority: recorded hit pos → spread evenly along tee→pin.
+        final LatLng startPos;
+        if (k < hitsForHole.length) {
+          startPos = hitsForHole[k];
+        } else {
+          startPos = _spreadPos(hole, k, target);
+        }
+        shots.add(Shot(
+          startLocation: startPos,
+          club: _guessClub(k, target, startPos, null),
+          lieType: k == target - 1 ? LieType.green : LieType.fairway,
+        ));
+      }
+    }
+
+    // Chain endLocations: shot[i].end = shot[i+1].start, last shot ends at pin.
+    final pin = _round!.course.holes.isNotEmpty
+        ? _round!.course.holes[_currentHoleIndex].pin
+        : null;
+    final chained = List<Shot>.generate(shots.length, (i) {
+      final end = i < shots.length - 1
+          ? shots[i + 1].startLocation
+          : pin;
+      if (end == null) return shots[i];
+      return shots[i].copyWith(endLocation: end);
+    });
+
+    final updatedHolePlays = [
+      ..._round!.holePlays.where((hp) => hp.holeNumber != holeNum),
+      HolePlay(holeNumber: holeNum, shots: chained),
+    ]..sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
+
+    setState(() => _round = _round!.copyWith(holePlays: updatedHolePlays));
+  }
+
   void _onShotDragUpdate(int shotIdx, DragUpdateDetails details) {
     final shots = _currentHoleShots();
     if (shotIdx >= shots.length) return;
@@ -812,10 +910,46 @@ class _RoundPageState extends State<RoundPage> {
         .toList();
   }
 
+  /// Returns an evenly-spaced position along the hole's play line (tee→
+  /// fairway centroids→pin) for shot [k] out of [total]. Spread is
+  /// fractional: shot 0 at tee, shot total-1 just before pin.
+  LatLng _spreadPos(Hole? hole, int k, int total) {
+    if (hole == null) return _currentPlayerPos ?? const LatLng(0, 0);
+    final line = hole.playLine();
+    if (line.isEmpty) return hole.pin;
+    if (line.length == 1) return line.first;
+    // Compute cumulative segment lengths.
+    final dist = const Distance();
+    final lengths = <double>[0];
+    for (int i = 1; i < line.length; i++) {
+      lengths.add(lengths.last + dist.as(LengthUnit.Meter, line[i - 1], line[i]));
+    }
+    final totalLen = lengths.last;
+    if (totalLen == 0) return line.first;
+    // t in [0, 1): shot 0 at start, last shot at (total-1)/total of the line.
+    final t = (total <= 1 ? 0.0 : k / total).clamp(0.0, 1.0);
+    final target = t * totalLen;
+    // Walk segments to find position at target distance.
+    for (int i = 1; i < line.length; i++) {
+      if (lengths[i] >= target) {
+        final segFrac = (target - lengths[i - 1]) / (lengths[i] - lengths[i - 1]);
+        final a = line[i - 1];
+        final b = line[i];
+        return LatLng(
+          a.latitude + (b.latitude - a.latitude) * segFrac,
+          a.longitude + (b.longitude - a.longitude) * segFrac,
+        );
+      }
+    }
+    return line.last;
+  }
+
   /// Call this when a swing/hit is detected to record the current GPS position.
   void recordHit() {
     if (_currentPlayerPos == null) return;
-    setState(() => _hitPositions.add(_currentPlayerPos!));
+    setState(() {
+      (_hitPositions[_currentHoleIndex] ??= []).add(_currentPlayerPos!);
+    });
   }
 
   void _pushWatchContext() {
@@ -829,6 +963,146 @@ class _RoundPageState extends State<RoundPage> {
       par: hole.par,
       distanceYards: dist,
     );
+  }
+
+  // ── Club guessing ─────────────────────────────────────────────────────────
+
+  /// Scratch-golfer carry distance in yards for a club.
+  double _baseClubDistYards(Club club) {
+    switch (club.type) {
+      case ClubType.driver:  return 240;
+      case ClubType.wood:
+        return club.number == '3' ? 215 : club.number == '5' ? 200 : 185;
+      case ClubType.hybrid:
+        return club.number == '3' ? 185 : club.number == '4' ? 175 : 165;
+      case ClubType.putter:  return 8;
+      case ClubType.iron:
+        if (club.name == 'LW') return 55;
+        if (club.name == 'SW') return 75;
+        if (club.name == 'GW') return 95;
+        if (club.name == 'PW') return 110;
+        final n = int.tryParse(club.number) ?? 7;
+        return 210.0 - n * 10; // 3i=180 … 9i=120
+      default: return 130;
+    }
+  }
+
+  /// Guess the most likely club for a shot given distance and context.
+  /// [shotIdx] is 0-based; [totalShots] is the full stroke count for the hole.
+  Club _guessClub(int shotIdx, int totalShots, LatLng start, LatLng? end) {
+    final holes = _round?.course.holes ?? [];
+    final hole = holes.isEmpty ? null : holes[_currentHoleIndex];
+    final pin = hole?.pin;
+    final hcp = (_round?.player.handicap ?? 18).clamp(0.0, 54.0);
+    // Scale: scratch = 1.0, 36 hcp ≈ 0.71
+    final scale = (1.0 - hcp * 0.008).clamp(0.70, 1.0);
+
+    final validStart = start.latitude != 0 || start.longitude != 0;
+
+    // Distance to use for club matching
+    double? distY;
+    if (validStart && end != null && (end.latitude != 0 || end.longitude != 0)) {
+      distY = const Distance().as(LengthUnit.Meter, start, end) * 1.09361;
+    } else if (validStart && pin != null) {
+      distY = const Distance().as(LengthUnit.Meter, start, pin) * 1.09361;
+    }
+
+    // Very close to pin → putter
+    if (distY != null && distY < 12) {
+      return _kBagClubs.lastWhere((e) => e.$2.type == ClubType.putter).$2;
+    }
+
+    // First shot: driver for par 4/5, best-fit iron for par 3
+    if (shotIdx == 0 && hole != null && hole.par >= 4) {
+      return _kBagClubs.firstWhere((e) => e.$2.type == ClubType.driver).$2;
+    }
+
+    // Last shot of ≥2: putter (likely on or near green)
+    if (shotIdx == totalShots - 1 && totalShots >= 2) {
+      return _kBagClubs.lastWhere((e) => e.$2.type == ClubType.putter).$2;
+    }
+
+    if (distY == null) {
+      // No position data — use shot-index heuristic for a par-4-like hole
+      const fallback = [ClubType.driver, ClubType.iron, ClubType.iron, ClubType.putter];
+      final type = shotIdx < fallback.length ? fallback[shotIdx] : ClubType.iron;
+      if (type == ClubType.putter) {
+        return _kBagClubs.lastWhere((e) => e.$2.type == ClubType.putter).$2;
+      }
+      if (type == ClubType.driver) {
+        return _kBagClubs.firstWhere((e) => e.$2.type == ClubType.driver).$2;
+      }
+      return _kBagClubs.firstWhere((e) => e.$2.number == '7' && e.$2.type == ClubType.iron).$2;
+    }
+
+    // Find the club whose scaled distance is closest to distY (exclude putter).
+    return _kBagClubs
+        .where((e) => e.$2.type != ClubType.putter)
+        .reduce((a, b) {
+          final da = (_baseClubDistYards(a.$2) * scale - distY!).abs();
+          final db = (_baseClubDistYards(b.$2) * scale - distY).abs();
+          return da <= db ? a : b;
+        })
+        .$2;
+  }
+
+  // ── Club sequence ──────────────────────────────────────────────────────────
+
+  /// Club sequence for the current hole, collapsing consecutive putts.
+  /// Returns (label, shotIndex, isGuessed) triples.
+  ///
+  /// Null-club shots get a guess from [_guessClub]; guessed entries are
+  /// flagged so the UI can dim them to distinguish from confirmed clubs.
+  /// Syncs length to [_strokes] in play mode.
+  List<(String, int, bool)> _clubSequence() {
+    var shots = _currentHoleShots();
+    final total = _strokes[_currentHoleIndex] ?? shots.length;
+
+    if (shots.length > total) {
+      shots = shots.sublist(0, total);
+    } else if (shots.length < total) {
+      shots = [
+        ...shots,
+        ...List.generate(
+          total - shots.length,
+          (_) => Shot(startLocation: const LatLng(0, 0), lieType: LieType.fairway),
+        ),
+      ];
+    }
+
+    final result = <(String, int, bool)>[];
+    int i = 0;
+    while (i < shots.length) {
+      final shot = shots[i];
+
+      if (shot.penalty) {
+        result.add(('Pen', i, false));
+        i++;
+        continue;
+      }
+
+      // Collapse consecutive putters
+      if (shot.club?.type == ClubType.putter) {
+        final start = i;
+        int count = 0;
+        while (i < shots.length && shots[i].club?.type == ClubType.putter) {
+          count++;
+          i++;
+        }
+        result.add((count == 1 ? 'Pu' : '${count}Pu', start, false));
+        continue;
+      }
+
+      if (shot.club != null) {
+        result.add((_clubLabel(shot.club), i, false));
+      } else {
+        // Guess club from distance / position / handicap
+        final guessed = _guessClub(i, total, shot.startLocation, shot.endLocation);
+        result.add((_clubLabel(guessed), i, true));
+      }
+      i++;
+    }
+    return result;
   }
 
   void _showShotEditor(int shotIdx) {
@@ -855,7 +1129,7 @@ class _RoundPageState extends State<RoundPage> {
   }
 
   String _clubLabel(Club? club) {
-    if (club == null) return 'Pen';
+    if (club == null) return '?';
     for (final (label, c) in _kBagClubs) {
       if (c.name == club.name) return label;
     }
@@ -867,7 +1141,7 @@ class _RoundPageState extends State<RoundPage> {
       case ClubType.hybrid:
         return '${club.number}h';
       case ClubType.putter:
-        return 'P';
+        return 'Pu';
       default:
         return club.number.isNotEmpty ? '${club.number}i' : '?';
     }
@@ -881,7 +1155,10 @@ class _RoundPageState extends State<RoundPage> {
         : (_strokes.keys.isEmpty ? 0 : _strokes.keys.reduce((a, b) => a > b ? a : b) + 1);
     return List.generate(holeCount, (i) {
       final holeNum = i + 1;
-      final target = _strokes[i] ?? 0;
+      final holePar = _round!.course.holes.isNotEmpty && i < _round!.course.holes.length
+          ? _round!.course.holes[i].par
+          : 4;
+      final target = _strokes[i] ?? holePar;
       final existing =
           _round!.holePlays.where((hp) => hp.holeNumber == holeNum).firstOrNull;
       if (target == 0) return existing ?? HolePlay(holeNumber: holeNum, shots: []);
@@ -890,17 +1167,35 @@ class _RoundPageState extends State<RoundPage> {
       if (shots.length > target) {
         return HolePlay(holeNumber: holeNum, shots: shots.sublist(0, target));
       }
-      final base = shots.isNotEmpty ? shots.last : null;
-      final extra = List.generate(
-        target - shots.length,
-        (_) => Shot(
-          startLocation: base?.endLocation ?? base?.startLocation ??
-              _currentPlayerPos ?? const LatLng(0, 0),
-          club: base?.club,
-          lieType: LieType.fairway,
-        ),
-      );
-      return HolePlay(holeNumber: holeNum, shots: [...shots, ...extra]);
+      final hole = _round!.course.holes.isNotEmpty && i < _round!.course.holes.length
+          ? _round!.course.holes[i]
+          : null;
+      final hitsForHole = _hitPositions[i] ?? [];
+      final extra = List.generate(target - shots.length, (j) {
+        final k = shots.length + j;
+        final LatLng startPos;
+        if (k < hitsForHole.length) {
+          startPos = hitsForHole[k];
+        } else {
+          startPos = _spreadPos(hole, k, target);
+        }
+        return Shot(
+          startLocation: startPos,
+          club: _guessClub(k, target, startPos, null),
+          lieType: k == target - 1 ? LieType.green : LieType.fairway,
+        );
+      });
+      final merged = [...shots, ...extra];
+      // Chain endLocations: shot[i].end = shot[i+1].start, last → pin.
+      final pin = hole?.pin;
+      final chained = List<Shot>.generate(merged.length, (idx) {
+        final end = idx < merged.length - 1
+            ? merged[idx + 1].startLocation
+            : pin;
+        if (end == null) return merged[idx];
+        return merged[idx].copyWith(endLocation: end);
+      });
+      return HolePlay(holeNumber: holeNum, shots: chained);
     });
   }
 
@@ -1077,7 +1372,7 @@ final _kBagClubs = [
   ('GW',  Club(name: 'GW',      brand: '', number: 'G',  type: ClubType.iron,   loft: 50)),
   ('SW',  Club(name: 'SW',      brand: '', number: 'S',  type: ClubType.iron,   loft: 54)),
   ('LW',  Club(name: 'LW',      brand: '', number: 'L',  type: ClubType.iron,   loft: 58)),
-  ('P',   Club(name: 'Putter',  brand: '', number: 'P',  type: ClubType.putter, loft: 4)),
+  ('Pu',  Club(name: 'Putter',  brand: '', number: 'P',  type: ClubType.putter, loft: 4)),
 ];
 
 class _ShotEditorSheet extends StatelessWidget {
