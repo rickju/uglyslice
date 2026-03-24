@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math' show cos, sqrt, pi;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -43,7 +45,10 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
 
   Future<void> _init() async {
     await RecentCourses.load();
-    await Future.wait([_fetchLocation(), _loadRecentRounds()]);
+    // Load courses and recent rounds immediately (no location yet).
+    await Future.wait([_loadAll(), _loadRecentRounds()]);
+    // Fetch location in background; re-sort once resolved.
+    await _fetchLocation();
     await _loadAll();
   }
 
@@ -53,19 +58,21 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   }
 
   Future<void> _fetchLocation() async {
-    // Try GPS first.
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission != LocationPermission.denied &&
-          permission != LocationPermission.deniedForever) {
-        final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.low,
-        ).timeout(const Duration(seconds: 5));
-        _lat = pos.latitude;
-        _lon = pos.longitude;
-        return;
-      }
-    } catch (_) {}
+    // Try GPS on mobile only (desktop has no GPS and times out).
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final permission = await Geolocator.checkPermission();
+        if (permission != LocationPermission.denied &&
+            permission != LocationPermission.deniedForever) {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.low,
+          ).timeout(const Duration(seconds: 5));
+          _lat = pos.latitude;
+          _lon = pos.longitude;
+          return;
+        }
+      } catch (_) {}
+    }
     // Fall back to IP geolocation (city-level, good enough for sorting).
     try {
       final res = await http
@@ -290,19 +297,8 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
                         style: TextStyle(
                             fontSize: 11, color: Colors.grey.shade500)),
                     trailing: holes > 0
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text('$total',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.bold)),
-                              Text('$holes holes',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey.shade500)),
-                            ],
-                          )
+                        ? Text('$total · $holes holes',
+                            style: const TextStyle(fontSize: 13))
                         : null,
                     onTap: () async {
                       final repo = CourseRepository(db);
