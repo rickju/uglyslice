@@ -49,7 +49,7 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
 
   Future<void> _loadRecentRounds() async {
     final rounds = await RoundRepository(db).listRoundsForPlayer('Rick');
-    if (mounted) setState(() => _recentRounds = rounds.take(5).toList());
+    if (mounted) setState(() => _recentRounds = rounds);
   }
 
   Future<void> _fetchLocation() async {
@@ -163,143 +163,168 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
   bool _isRecent(CourseListRow course) =>
       RecentCourses.cached.contains(course.name);
 
+  Widget _sectionHeader(BuildContext context,
+      {required IconData icon, required String label}) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Play'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Sync courses',
-              onPressed: _isLoading ? null : _sync,
-            ),
-          ],
-          bottom: TabBar(
-            tabs: [
-              const Tab(icon: Icon(Icons.golf_course), text: 'Courses'),
-              Tab(
-                icon: Badge(
-                  isLabelVisible: _recentRounds.isNotEmpty,
-                  label: Text('${_recentRounds.length}'),
-                  child: const Icon(Icons.history),
-                ),
-                text: 'Recent Rounds',
-              ),
-            ],
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Play'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Sync courses',
+            onPressed: _isLoading ? null : _sync,
           ),
-        ),
-        body: TabBarView(
-          children: [
-            // ── Courses tab ──────────────────────────────────────────
-            Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: 'Search',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                    onChanged: _search,
-                  ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search for a course',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                filled: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
                 ),
-                if (_isLoading)
-                  const Expanded(
-                      child: Center(child: CircularProgressIndicator()))
-                else if (_error != null)
-                  Expanded(
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_error!, textAlign: TextAlign.center),
-                          const SizedBox(height: 12),
-                          ElevatedButton(
-                              onPressed: _sync, child: const Text('Retry')),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: _results.length,
-                      itemBuilder: (context, i) {
-                        final course = _results[i];
-                        final recent = _isRecent(course);
-                        String? distLabel;
-                        if (_lat != null && _lon != null) {
-                          final dlat = course.lat - _lat!;
-                          final dlon = (course.lon - _lon!) *
-                              cos(_lat! * pi / 180);
-                          final km = sqrt(dlat * dlat + dlon * dlon) * 111;
-                          distLabel = km < 1 ? '<1 km' : '${km.round()} km';
-                        }
-                        return ListTile(
-                          leading: recent
-                              ? const Icon(Icons.history,
-                                  size: 18, color: Colors.amber)
-                              : null,
-                          title: Text(course.name),
-                          trailing: distLabel != null
-                              ? Text(distLabel,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade500))
-                              : null,
-                          onTap: () => _openCourse(course),
-                        );
-                      },
-                    ),
-                  ),
-              ],
+              ),
+              onChanged: _search,
             ),
-            // ── Recent Rounds tab ────────────────────────────────────
-            _recentRounds.isEmpty
-                ? const Center(child: Text('No rounds yet'))
-                : ListView.builder(
-                    itemCount: _recentRounds.length,
-                    itemBuilder: (context, i) {
-                      final round = _recentRounds[i];
-                      final total = round.holePlays
-                          .fold(0, (s, hp) => s + hp.score);
-                      final holes = round.holePlays.length;
-                      final date = round.date;
-                      final dateStr =
-                          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-                      return ListTile(
-                        leading: const Icon(Icons.flag_outlined),
-                        title: Text(round.course.name),
-                        subtitle: Text(dateStr),
-                        trailing: holes > 0
-                            ? Text('$total pts · $holes holes',
-                                style: const TextStyle(fontSize: 13))
-                            : null,
-                        onTap: () async {
-                          final repo = CourseRepository(db);
-                          final course =
-                              await repo.fetchCourse(round.course.id);
-                          if (course == null || !mounted) return;
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => RoundPage(
-                                courseId: round.course.id,
-                                courseName: round.course.name,
-                                reviewRound: round.copyWith(course: course),
-                              ),
-                            ),
-                          );
-                        },
+          ),
+          // ── Course list ──────────────────────────────────────────────
+          if (_isLoading)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else if (_error != null)
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_error!, textAlign: TextAlign.center),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                        onPressed: _sync, child: const Text('Retry')),
+                  ],
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: _results.length,
+                itemBuilder: (context, i) {
+                  final course = _results[i];
+                  final recent = _isRecent(course);
+                  String? distLabel;
+                  if (_lat != null && _lon != null) {
+                    final dlat = course.lat - _lat!;
+                    final dlon = (course.lon - _lon!) * cos(_lat! * pi / 180);
+                    final km = sqrt(dlat * dlat + dlon * dlon) * 111;
+                    distLabel = km < 1 ? '<1 km' : '${km.round()} km';
+                  }
+                  return ListTile(
+                    leading: recent
+                        ? const Icon(Icons.history, size: 18, color: Colors.amber)
+                        : null,
+                    title: Text(course.name),
+                    trailing: distLabel != null
+                        ? Text(distLabel,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade500))
+                        : null,
+                    onTap: () => _openCourse(course),
+                  );
+                },
+              ),
+            ),
+          // ── Recent rounds panel ──────────────────────────────────────
+          if (_recentRounds.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Divider(height: 1, thickness: 1),
+            _sectionHeader(context,
+                icon: Icons.history, label: 'Recent Rounds'),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 8),
+                itemCount: _recentRounds.length,
+                itemBuilder: (context, i) {
+                  final round = _recentRounds[i];
+                  final total =
+                      round.holePlays.fold(0, (s, hp) => s + hp.score);
+                  final holes = round.holePlays.length;
+                  final date = round.date;
+                  final dateStr =
+                      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+                  return ListTile(
+                    dense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                    title: Text(round.course.name,
+                        style: const TextStyle(fontSize: 14)),
+                    subtitle: Text(dateStr,
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500)),
+                    trailing: holes > 0
+                        ? Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('$total',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold)),
+                              Text('$holes holes',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500)),
+                            ],
+                          )
+                        : null,
+                    onTap: () async {
+                      final repo = CourseRepository(db);
+                      final course = await repo.fetchCourse(round.course.id);
+                      if (course == null || !mounted) return;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RoundPage(
+                            courseId: round.course.id,
+                            courseName: round.course.name,
+                            reviewRound: round.copyWith(course: course),
+                          ),
+                        ),
                       );
                     },
-                  ),
+                  );
+                },
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
