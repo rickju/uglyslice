@@ -1155,12 +1155,13 @@ class _RoundPageState extends State<RoundPage> {
         : (_strokes.keys.isEmpty ? 0 : _strokes.keys.reduce((a, b) => a > b ? a : b) + 1);
     return List.generate(holeCount, (i) {
       final holeNum = i + 1;
-      final holePar = _round!.course.holes.isNotEmpty && i < _round!.course.holes.length
-          ? _round!.course.holes[i].par
-          : 4;
-      final target = _strokes[i] ?? holePar;
       final existing =
           _round!.holePlays.where((hp) => hp.holeNumber == holeNum).firstOrNull;
+      // Only generate shots for holes the user explicitly scored.
+      if (!_strokes.containsKey(i)) {
+        return existing ?? HolePlay(holeNumber: holeNum, shots: []);
+      }
+      final target = _strokes[i]!;
       if (target == 0) return existing ?? HolePlay(holeNumber: holeNum, shots: []);
       final shots = existing?.shots ?? [];
       if (shots.length == target) return existing!;
