@@ -28,6 +28,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadHandicap() async {
+    try {
+      await _doLoadHandicap();
+    } catch (e, st) {
+      debugPrint('_loadHandicap error: $e\n$st');
+      if (mounted) setState(() => _loadingHandicap = false);
+    }
+  }
+
+  Future<void> _doLoadHandicap() async {
     await CourseRatingStore.load();
     final rounds = await RoundRepository(db).listRoundsForPlayer('Rick');
     if (!mounted) return;
@@ -106,13 +115,22 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: const Text('Add 3 fake Karori rounds'),
             trailing: const Icon(Icons.add_circle_outline),
             onTap: () async {
-              await seedKaroriRounds(db);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Seeded 3 Karori rounds')),
-                );
+              try {
+                await seedKaroriRounds(db);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Seeded 3 Karori rounds')),
+                  );
+                }
+                _loadHandicap();
+              } catch (e, st) {
+                debugPrint('Seed error: $e\n$st');
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Seed failed: $e')),
+                  );
+                }
               }
-              _loadHandicap();
             },
           ),
           const Divider(),

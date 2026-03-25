@@ -37,9 +37,9 @@ const _holeLayout = [
 const _rounds = [
   // Round 1: 82 (+12) — a rough day
   [4, 3, 5, 4, 4, 4, 6, 5, 4, 5, 4, 5, 3, 6, 5, 5, 5, 5],
-  // Round 2: 78 (+8) — decent
+  // Round 2: 77 (+7) — decent
   [5, 3, 4, 3, 5, 3, 5, 4, 5, 4, 4, 5, 3, 5, 4, 5, 4, 6],
-  // Round 3: 76 (+6) — best round
+  // Round 3: 74 (+4) — best round
   [4, 3, 4, 3, 5, 3, 5, 4, 4, 4, 4, 4, 3, 6, 4, 4, 5, 5],
 ];
 
@@ -171,24 +171,29 @@ List<LatLng> _buildHitPositions(int roundIdx, List<List<Shot>> holeShots) {
 }
 
 /// Build shots for a hole. Each shot walks along the tee→pin line.
-List<Shot> _buildShots(int holeIdx, int score) {
+///
+/// The second-to-last shot lands on the green (LieType.green) so that GIR
+/// is calculated correctly. Par-3 tee shots use a 7-iron, not a driver.
+List<Shot> _buildShots(int holeIdx, int score, int par) {
   final h = _holeLayout[holeIdx];
   final teeLat = h[0], teeLon = h[1], pinLat = h[2], pinLon = h[3];
+  final bool isParThree = par == 3;
 
   if (score == 1) {
     return [
       Shot(
         startLocation: LatLng(teeLat, teeLon),
         endLocation: LatLng(pinLat, pinLon),
-        club: _dummyClub,
-        lieType: LieType.fairway,
+        club: isParThree ? _dummyClub : _driver,
+        lieType: LieType.green,
       ),
     ];
   }
 
   final shots = <Shot>[];
-  // Divide hole into (score-1) approach segments, last shot is a putt to pin.
-  // Breakpoints: 0, 1/(score-1), 2/(score-1), ..., 1
+  // Approach shots: evenly spaced along the tee→pin line.
+  // Second-to-last shot (k == score-2) lands on the green — this is what
+  // the GIR check uses to determine whether you reached in regulation.
   for (int k = 0; k < score; k++) {
     final startT = k == 0 ? 0.0 : k / (score - 1);
     final endT = k == score - 1 ? 1.0 : (k + 1) / (score - 1);
@@ -196,12 +201,16 @@ List<Shot> _buildShots(int holeIdx, int score) {
     final end = _lerp(teeLat, teeLon, pinLat, pinLon, endT.clamp(0, 1));
     final Club club;
     final LieType lie;
-    if (k == 0) {
-      club = _driver;
-      lie = LieType.fairway;
-    } else if (k == score - 1) {
+    if (k == score - 1) {
       club = _putter;
       lie = LieType.green;
+    } else if (k == score - 2) {
+      // Approach that lands on the green.
+      club = _dummyClub;
+      lie = LieType.green;
+    } else if (k == 0) {
+      club = isParThree ? _dummyClub : _driver;
+      lie = LieType.fairway;
     } else {
       club = _dummyClub;
       lie = LieType.fairway;
@@ -222,7 +231,7 @@ Future<void> seedKaroriRounds(AppDatabase db) async {
 
   for (int r = 0; r < _rounds.length; r++) {
     final scores = _rounds[r];
-    final holeShots = List.generate(18, (i) => _buildShots(i, scores[i]));
+    final holeShots = List.generate(18, (i) => _buildShots(i, scores[i], _karoriPars[i]));
     final holePlays = List.generate(18, (i) => HolePlay(
       holeNumber: i + 1,
       shots: holeShots[i],

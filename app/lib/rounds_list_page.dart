@@ -29,7 +29,7 @@ class RoundsListPage extends StatelessWidget {
           }
           return ListView.separated(
             itemCount: rounds.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+            separatorBuilder: (context, i) => const Divider(height: 1),
             itemBuilder: (context, i) => _RoundTile(round: rounds[i]),
           );
         },
@@ -54,19 +54,9 @@ class _RoundTile extends StatelessWidget {
       title: Text(round.course.name,
           style: const TextStyle(fontWeight: FontWeight.w600)),
       subtitle: Text(dateStr),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            '$total',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
-          Text(
-            '${round.holePlays.length} holes',
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
-          ),
-        ],
+      trailing: Text(
+        '$total',
+        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
       ),
       onTap: () => Navigator.push(
         context,
