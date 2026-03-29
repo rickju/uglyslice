@@ -74,6 +74,22 @@ class RawJsonStore {
     return rows.first['raw_json'] as String;
   }
 
+  /// Returns cached raw JSON if it was fetched within [maxAge], else null.
+  Future<String?> loadIfFresh(String name, {Duration maxAge = const Duration(hours: 23)}) async {
+    final db = await _open();
+    final cutoff = DateTime.now().subtract(maxAge).millisecondsSinceEpoch;
+    final rows = await db.query(
+      'overpass_cache',
+      columns: ['raw_json'],
+      where: 'name = ? AND fetched_at >= ?',
+      whereArgs: [name, cutoff],
+      orderBy: 'fetched_at DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['raw_json'] as String;
+  }
+
   Future<void> save(String name, String rawJson, int elementCount) async {
     final db = await _open();
     await db.insert('overpass_cache', {
