@@ -8,7 +8,37 @@ import 'supabase_client.dart';
 
 String _md5(String data) => md5.convert(utf8.encode(data)).toString();
 
-const overpassUrl = 'https://overpass-api.de/api/interpreter';
+/// Overpass servers tried in order. First success wins.
+const _overpassServers = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
+/// Posts [body] to Overpass, trying each server in order until one succeeds.
+Future<http.Response> _overpassPost(String body,
+    {Duration timeout = const Duration(seconds: 360)}) async {
+  Exception? lastError;
+  for (final url in _overpassServers) {
+    try {
+      print('  [Overpass] trying $url ...');
+      final resp =
+          await http.post(Uri.parse(url), body: body).timeout(timeout);
+      if (resp.statusCode == 200 && !resp.body.trimLeft().startsWith('<')) {
+        return resp;
+      }
+      final snippet = resp.body.length > 200
+          ? resp.body.substring(0, 200)
+          : resp.body;
+      lastError = Exception(
+          'Overpass $url → ${resp.statusCode}: $snippet');
+    } catch (e) {
+      lastError = Exception('Overpass $url → $e');
+      print('  [Overpass] $url failed: $e');
+    }
+  }
+  throw lastError ?? Exception('All Overpass servers failed');
+}
 const nzBbox = '-47.5,166.0,-34.0,179.0';
 
 /// Fetch, parse, and upsert a single course. Returns the courseId.
@@ -28,8 +58,7 @@ Future<String> ingestOneCourse(String courseName, {String? bbox}) async {
   } else {
     final query = buildDetailQuery(courseName, effectiveBbox);
     final fetchStart = DateTime.now();
-    final overpassResponse =
-        await http.post(Uri.parse(overpassUrl), body: query);
+    final overpassResponse = await _overpassPost(query);
     final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
     if (overpassResponse.statusCode != 200) {
@@ -198,9 +227,8 @@ Future<IngestAllResult> _ingestFromQueries({
 }) async {
   final supabase = SupabaseRestClient();
 
-  final listResponse = await http
-      .post(Uri.parse(overpassUrl), body: listQuery)
-      .timeout(const Duration(seconds: 150));
+  final listResponse = await _overpassPost(listQuery,
+      timeout: const Duration(seconds: 150));
 
   if (listResponse.statusCode != 200) {
     throw Exception('Overpass list query failed: ${listResponse.statusCode}');
@@ -280,9 +308,7 @@ Future<IngestAllResult> _ingestFromQueries({
     rawBody = cached;
   } else {
     final fetchStart = DateTime.now();
-    final detailResponse = await http
-        .post(Uri.parse(overpassUrl), body: detailQuery)
-        .timeout(const Duration(seconds: 330));
+    final detailResponse = await _overpassPost(detailQuery);
     final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
     if (detailResponse.statusCode != 200) {
@@ -291,6 +317,11 @@ Future<IngestAllResult> _ingestFromQueries({
     }
 
     rawBody = detailResponse.body;
+    if (rawBody.trimLeft().startsWith('<')) {
+      // Overpass returns XML on error (rate limit, timeout, server error).
+      final snippet = rawBody.length > 300 ? rawBody.substring(0, 300) : rawBody;
+      throw Exception('Overpass returned XML (likely rate-limited or timed out):\n$snippet');
+    }
     final detailData = jsonDecode(rawBody) as Map<String, dynamic>;
     final elementCount =
         (detailData['elements'] as List<dynamic>? ?? []).length;
@@ -302,7 +333,11 @@ Future<IngestAllResult> _ingestFromQueries({
 
   print('\nParsing all courses ...');
   final allParsed = parseAllCourses(rawBody);
-  print('Found ${allParsed.length} parseable courses (way/relation geometry)\n');
+  print('Found ${allParsed.length} parseable courses (way/relation geometry)');
+
+  // Split bulk blob into per-course cache entries so reparse/check-cache work offline.
+  await _splitBulkBlobToCourseCache(rawBody, allParsed, store);
+  print('');
 
   final total =
       limit != null && limit < allParsed.length ? limit : allParsed.length;
@@ -367,23 +402,30 @@ Future<IngestAllResult> _ingestFromQueries({
 }
 
 /// Fetch all NZ courses from Overpass, upsert course_list, then parse and
-/// upsert each course. Returns summary counts.
-Future<IngestAllResult> ingestAllNzCourses({int? limit}) {
-  final listQuery = '''
+/// upsert each course. Splits into North + South Island to avoid 504 timeouts.
+Future<IngestAllResult> ingestAllNzCourses({int? limit}) async {
+  // Split NZ into two smaller bboxes to stay within Overpass timeout limits.
+  const niBbox = '-41.7,172.5,-34.0,178.6'; // North Island
+  const siBbox = '-47.5,166.0,-41.7,174.5'; // South Island + Stewart Island
+
+  int total = 0, succeeded = 0, failed = 0;
+  for (final entry in [('north_island', niBbox), ('south_island', siBbox)]) {
+    final (label, bbox) = entry;
+    print('\n=== NZ $label ===');
+    final listQuery = '''
 [out:json][timeout:120];
 (
-  node["leisure"="golf_course"]($nzBbox);
-  way["leisure"="golf_course"]($nzBbox);
-  relation["leisure"="golf_course"]($nzBbox);
+  node["leisure"="golf_course"]($bbox);
+  way["leisure"="golf_course"]($bbox);
+  relation["leisure"="golf_course"]($bbox);
 );
 out center tags;
 ''';
-
-  final detailQuery = '''
+    final detailQuery = '''
 [out:json][timeout:300];
 (
-  way["leisure"="golf_course"]($nzBbox);
-  relation["leisure"="golf_course"]($nzBbox);
+  way["leisure"="golf_course"]($bbox);
+  relation["leisure"="golf_course"]($bbox);
 )->.courses;
 .courses out geom;
 (
@@ -393,13 +435,17 @@ out center tags;
 );
 out geom;
 ''';
-
-  return _ingestFromQueries(
-    listQuery: listQuery,
-    detailQuery: detailQuery,
-    cacheKey: '__all_nz__',
-    limit: limit,
-  );
+    final result = await _ingestFromQueries(
+      listQuery: listQuery,
+      detailQuery: detailQuery,
+      cacheKey: '__nz_${label}__',
+      limit: limit,
+    );
+    total += result.total;
+    succeeded += result.succeeded;
+    failed += result.failed;
+  }
+  return (total: total, succeeded: succeeded, failed: failed);
 }
 
 /// Fetch all courses in a named region (country, state, or county) from
@@ -549,7 +595,7 @@ Future<void> checkCourse(String courseName, {String? bbox}) async {
   final query = buildDetailQuery(courseName, effectiveBbox);
   final fetchStart = DateTime.now();
   final overpassResponse =
-      await http.post(Uri.parse(overpassUrl), body: query);
+      await _overpassPost(query);
   final fetchMs = DateTime.now().difference(fetchStart).inMilliseconds;
 
   if (overpassResponse.statusCode != 200) {
@@ -830,6 +876,116 @@ Future<void> auditAllCourses({bool dryRun = false}) async {
   print('\nAudit complete: ${rows.length} courses  '
       'clean=$cleanCount  errors=$totalErrors  warnings=$totalWarnings');
   if (dryRun) print('(dry run — no writes)');
+}
+
+/// Splits a bulk Overpass JSON blob into per-course mini-JSON cache entries.
+/// Each course's elements are extracted via bounding-box spatial filter.
+Future<void> _splitBulkBlobToCourseCache(
+    String rawBody, List<ParsedCourse> parsed, RawJsonStore store) async {
+  final data = jsonDecode(rawBody) as Map<String, dynamic>;
+  final elements = (data['elements'] as List<dynamic>).cast<Map<String, dynamic>>();
+
+  // Build ID → element map for O(1) course lookup.
+  final elementById = <int, Map<String, dynamic>>{};
+  for (final el in elements) {
+    final id = el['id'] as int?;
+    if (id != null) elementById[id] = el;
+  }
+
+  int saved = 0;
+  for (final course in parsed) {
+    final name = course.courseDoc['name'] as String? ?? '';
+    if (name.isEmpty) continue;
+
+    // Skip if already freshly cached under this name.
+    if (await store.loadIfFresh(name) != null) continue;
+
+    // Get course OSM ID from courseId ("course_12345" → 12345).
+    final osmId = int.tryParse(course.courseId.replaceFirst('course_', ''));
+    if (osmId == null) continue;
+
+    final courseEl = elementById[osmId];
+    if (courseEl == null) continue;
+
+    // Derive bbox from the element's bounds or geometry.
+    final bounds = courseEl['bounds'] as Map<String, dynamic>?;
+    double? minLat, minLon, maxLat, maxLon;
+    if (bounds != null) {
+      minLat = (bounds['minlat'] as num).toDouble();
+      minLon = (bounds['minlon'] as num).toDouble();
+      maxLat = (bounds['maxlat'] as num).toDouble();
+      maxLon = (bounds['maxlon'] as num).toDouble();
+    } else {
+      final geom = (courseEl['geometry'] as List<dynamic>?)?.cast<Map<String, dynamic>>();
+      if (geom == null || geom.isEmpty) continue;
+      for (final pt in geom) {
+        final lat = (pt['lat'] as num?)?.toDouble();
+        final lon = (pt['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+        minLat = minLat == null ? lat : (lat < minLat ? lat : minLat);
+        minLon = minLon == null ? lon : (lon < minLon ? lon : minLon);
+        maxLat = maxLat == null ? lat : (lat > maxLat ? lat : maxLat);
+        maxLon = maxLon == null ? lon : (lon > maxLon ? lon : maxLon);
+      }
+    }
+    if (minLat == null) continue;
+
+    // Pad bbox slightly so nearby tee/pin nodes aren't clipped.
+    const pad = 0.001;
+    final bboxMinLat = minLat - pad;
+    final bboxMinLon = minLon! - pad;
+    final bboxMaxLat = maxLat! + pad;
+    final bboxMaxLon = maxLon! + pad;
+
+    bool inBbox(Map<String, dynamic> el) {
+      // Check top-level lat/lon (nodes).
+      final lat = (el['lat'] as num?)?.toDouble();
+      final lon = (el['lon'] as num?)?.toDouble();
+      if (lat != null && lon != null) {
+        return lat >= bboxMinLat && lat <= bboxMaxLat &&
+            lon >= bboxMinLon && lon <= bboxMaxLon;
+      }
+      // Check center.
+      final center = el['center'] as Map<String, dynamic>?;
+      if (center != null) {
+        final clat = (center['lat'] as num?)?.toDouble();
+        final clon = (center['lon'] as num?)?.toDouble();
+        if (clat != null && clon != null) {
+          return clat >= bboxMinLat && clat <= bboxMaxLat &&
+              clon >= bboxMinLon && clon <= bboxMaxLon;
+        }
+      }
+      // Check element bounds overlap.
+      final eb = el['bounds'] as Map<String, dynamic>?;
+      if (eb != null) {
+        final eMinLat = (eb['minlat'] as num).toDouble();
+        final eMinLon = (eb['minlon'] as num).toDouble();
+        final eMaxLat = (eb['maxlat'] as num).toDouble();
+        final eMaxLon = (eb['maxlon'] as num).toDouble();
+        return eMaxLat >= bboxMinLat && eMinLat <= bboxMaxLat &&
+            eMaxLon >= bboxMinLon && eMinLon <= bboxMaxLon;
+      }
+      // Check geometry points.
+      final geom = (el['geometry'] as List<dynamic>?)?.cast<Map<String, dynamic>>();
+      if (geom != null) {
+        return geom.any((pt) {
+          final glat = (pt['lat'] as num?)?.toDouble();
+          final glon = (pt['lon'] as num?)?.toDouble();
+          if (glat == null || glon == null) return false;
+          return glat >= bboxMinLat && glat <= bboxMaxLat &&
+              glon >= bboxMinLon && glon <= bboxMaxLon;
+        });
+      }
+      return false;
+    }
+
+    final courseElements = elements.where(inBbox).toList();
+    final miniJson = jsonEncode({'elements': courseElements});
+    await store.save(name, miniJson, courseElements.length);
+    saved++;
+  }
+
+  print('  → Split bulk blob → $saved per-course cache entries');
 }
 
 String buildDetailQuery(String courseName, String bbox) => '''

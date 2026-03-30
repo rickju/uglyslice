@@ -19,79 +19,94 @@ Future<void> main(List<String> args) async {
   }
 
   switch (args[0]) {
-    case 'ingest-course':
+
+    // ── Stage 1: Overpass ──────────────────────────────────────────────────────
+
+    case 'fetch':
+    case 'ingest-course': // alias
       final name = args.length >= 2 ? args[1] : await _pickCourseName();
       if (name == null) exit(1);
       final bbox = args.length > 2 ? args[2] : null;
       await ingestOneCourse(name, bbox: bbox);
 
-    case 'reparse-course':
-      final name = args.length >= 2 ? args[1] : await _pickCourseName();
-      if (name == null) exit(1);
-      await reparseCourse(name);
-
-    case 'ingest-all':
+    case 'fetch-nz':
+    case 'ingest-nz': // alias
       final limitArg = args.indexOf('--limit');
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
       await ingestAllNzCourses(limit: limit);
 
-    case 'ingest-region':
+    case 'fetch-region':
+    case 'ingest-region': // alias
       if (args.length < 2) {
-        print('Error: ingest-region requires a region name.');
-        print(
-            '  Usage: dart run bin/cli.dart ingest-region "New Zealand" [--limit N]');
+        print('Error: fetch-region requires a region name.');
+        print('  Usage: dart run bin/cli.dart fetch-region "New Zealand" [--limit N]');
         exit(1);
       }
       final limitArg = args.indexOf('--limit');
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
       await ingestRegion(args[1], limit: limit);
 
-    case 'query-course':
-      final name = args.length >= 2 ? args[1] : await _pickCourseName();
-      if (name == null) exit(1);
-      await queryCourse(name);
+    // ── Stage 2: Cache ─────────────────────────────────────────────────────────
 
-    case 'check-integrity':
-      final name = args.length >= 2 ? args[1] : await _pickCourseName();
-      if (name == null) exit(1);
-      await checkCourseIntegrity(name);
+    case 'cache-status':
+      final query = args.length >= 2 ? args[1] : null;
+      await _cacheStatus(filter: query);
 
-    case 'check-course':
-      final name = args.length >= 2 ? args[1] : await _pickCourseName();
-      if (name == null) exit(1);
-      final bbox = args.length > 2 ? args[2] : null;
-      await checkCourse(name, bbox: bbox);
+    case 'cache-list':
+    case 'list-courses':   // alias
+    case 'search-courses': // alias
+      final query = args.length >= 2 ? args[1] : null;
+      if (query != null) {
+        await searchCachedCourses(query);
+      } else {
+        await listCachedCourses();
+      }
 
-    case 'check-cache':
+    case 'cache-parse':
+    case 'check-cache':  // alias
+    case 'check-course': // alias (was fetch+parse; now cache-only)
       final name = args.length >= 2 ? args[1] : await _pickCourseName();
       if (name == null) exit(1);
       await checkCourseFromCache(name);
 
-    case 'search-courses':
-      if (args.length < 2) {
-        print('Error: search-courses requires a query.');
-        print('  Usage: dart run bin/cli.dart search-courses "karori"');
-        exit(1);
-      }
-      await searchCachedCourses(args[1]);
+    case 'cache-reparse':
+    case 'reparse-course': // alias
+      final name = args.length >= 2 ? args[1] : await _pickCourseName();
+      if (name == null) exit(1);
+      await reparseCourse(name);
 
-    case 'list-courses':
-      await listCachedCourses();
+    // ── Stage 3: Supabase ──────────────────────────────────────────────────────
 
-    case 'enrich-course':
+    case 'db-show':
+    case 'query-course': // alias
+      final name = args.length >= 2 ? args[1] : await _pickCourseName();
+      if (name == null) exit(1);
+      await queryCourse(name);
+
+    case 'db-integrity':
+    case 'check-integrity': // alias
+      final name = args.length >= 2 ? args[1] : await _pickCourseName();
+      if (name == null) exit(1);
+      await checkCourseIntegrity(name);
+
+    case 'db-enrich':
+    case 'enrich-course': // alias
       final name = args.length >= 2 ? args[1] : await _pickCourseName();
       if (name == null) exit(1);
       await _enrichOneCourse(name);
 
-    case 'delete-course':
+    case 'db-delete':
+    case 'delete-course': // alias
       final name = args.length >= 2 ? args[1] : await _pickCourseName();
       if (name == null) exit(1);
       await _deleteCourse(name, dryRun: args.contains('--dry-run'));
 
-    case 'cleanup-junk':
+    case 'db-cleanup':
+    case 'cleanup-junk': // alias
       await _cleanupJunk(dryRun: args.contains('--dry-run'));
 
-    case 'reingest-incomplete':
+    case 'db-incomplete':
+    case 'reingest-incomplete': // alias
       final limitArg = args.indexOf('--limit');
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
       final threshArg = args.indexOf('--min-holes');
@@ -345,6 +360,70 @@ void _saveRecent(String name) {
 
 // ── Delete / cleanup ──────────────────────────────────────────────────────────
 
+// ── Cache status ──────────────────────────────────────────────────────────────
+
+Future<void> _cacheStatus({String? filter}) async {
+  final store = RawJsonStore();
+  final allEntries = await store.cacheStatus(filter: filter, includeSystem: true);
+  await store.close();
+
+  if (allEntries.isEmpty) {
+    print(filter != null ? 'No cache entries matching "$filter".' : 'Cache is empty.');
+    return;
+  }
+
+  final systemEntries = allEntries.where((e) => (e['name'] as String).startsWith('_')).toList();
+  final courseEntries = allEntries.where((e) => !(e['name'] as String).startsWith('_')).toList();
+
+  final totalBytes = allEntries.fold<int>(0, (s, e) => s + (e['json_bytes'] as int? ?? 0));
+  print('Overpass cache: ${courseEntries.length} course(s)  ${systemEntries.length} bulk blob(s)  ${_fmtBytes(totalBytes)} total\n');
+
+  final header = '${'Name'.padRight(50)}  ${'Fetched'.padRight(16)}  ${'Age'.padLeft(8)}  Ver  Size';
+  final divider = '-' * header.length;
+
+  void printEntries(List<Map<String, dynamic>> entries) {
+    final now = DateTime.now();
+    for (final e in entries) {
+      final name = (e['name'] as String).padRight(50);
+      final ms = e['last_fetched'] as int;
+      final fetched = DateTime.fromMillisecondsSinceEpoch(ms);
+      final age = now.difference(fetched);
+      final ageStr = _fmtAge(age).padLeft(8);
+      final fetchedStr = fetched.toLocal().toString().substring(0, 16).padRight(16);
+      final versions = (e['versions'] as int).toString().padLeft(3);
+      final sizeStr = _fmtBytes(e['json_bytes'] as int? ?? 0).padLeft(6);
+      print('$name  $fetchedStr  $ageStr  $versions  $sizeStr');
+    }
+  }
+
+  if (systemEntries.isNotEmpty) {
+    print('BULK BLOBS');
+    print(header);
+    print(divider);
+    printEntries(systemEntries);
+    print('');
+  }
+
+  if (courseEntries.isNotEmpty) {
+    print('INDIVIDUAL COURSES');
+    print(header);
+    print(divider);
+    printEntries(courseEntries);
+  }
+}
+
+String _fmtAge(Duration d) {
+  if (d.inDays > 0) return '${d.inDays}d ${d.inHours % 24}h';
+  if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
+  return '${d.inMinutes}m';
+}
+
+String _fmtBytes(int bytes) {
+  if (bytes >= 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
+  if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)}KB';
+  return '${bytes}B';
+}
+
 // ── Reingest incomplete courses ───────────────────────────────────────────────
 
 /// Re-ingests courses that have fewer than [minHoles] holes parsed.
@@ -566,24 +645,26 @@ Future<void> _cleanupJunk({bool dryRun = false}) async {
 void _usage() {
   print('Usage: dart run bin/cli.dart <command> [args]');
   print('');
-  print('Commands:');
-  print('  ingest-course [name] [bbox]   Fetch, parse, and upsert a single course');
-  print('  reparse-course [name]         Re-parse from local cache, upsert (no Overpass)');
-  print('  ingest-all [--limit N]        Fetch and upsert all NZ courses');
-  print('  ingest-region <name> [--limit N]  Fetch and upsert courses in a named region');
-  print('  check-course  [name] [bbox]   Fetch and parse a course, print details (no upsert)');
-  print('  check-cache   [name]          Parse from local cache, print details (no Overpass/Supabase)');
-  print('  search-courses <query>        Search cached course names for a partial match');
-  print('  list-courses                  List all course names in the local cache');
-  print('  query-course  [name]          Query Supabase for a stored course and print details');
-  print('  check-integrity [name]        Query Supabase and report integrity issues');
-  print('  enrich-course [name]          Web search + Claude extract → patch course in Supabase');
-  print('  delete-course [name] [--dry-run]  Remove a course from courses + course_list');
-  print('  cleanup-junk  [--dry-run]     Remove driving ranges, mini golf, etc.');
-  print('  reingest-incomplete           Re-fetch courses with <9 holes from Overpass');
-  print('    [--region <name>]           Region to filter (default: New Zealand)');
-  print('    [--min-holes N]             Hole threshold (default: 9)');
-  print('    [--limit N]                 Max courses to process');
+  print('── Stage 1: Overpass  (fetch from OSM → local cache + Supabase) ──────────');
+  print('  fetch [name] [bbox]              Fetch one course → cache + Supabase');
+  print('  fetch-nz [--limit N]             Fetch all NZ courses (NI + SI)');
+  print('  fetch-region <name> [--limit N]  Fetch all courses in a named region');
+  print('');
+  print('── Stage 2: Cache  (local SQLite, no network) ───────────────────────────');
+  print('  cache-status [query]             Show cached blobs: name, age, size, versions');
+  print('  cache-list   [query]             List cached course names (filter optional)');
+  print('  cache-parse  [name]              Parse from cache, print details (no DB write)');
+  print('  cache-reparse [name]             Parse from cache, upsert to Supabase');
+  print('');
+  print('── Stage 3: Supabase  (read/write DB) ───────────────────────────────────');
+  print('  db-show      [name]              Print course details from Supabase');
+  print('  db-integrity [name]              Run integrity checks, show issues');
+  print('  db-enrich    [name]              Web search + Claude → patch course');
+  print('  db-delete    [name] [--dry-run]  Remove course from courses + course_list');
+  print('  db-cleanup   [--dry-run]         Remove driving ranges, mini golf, etc.');
+  print('  db-incomplete [--region R] [--min-holes N] [--limit N]');
+  print('                                   Re-fetch courses with too few holes');
   print('');
   print('Tip: omit [name] for an interactive picker (★ recent · sorted nearby · type to filter).');
+  print('Old command names (ingest-course, reparse-course, query-course, etc.) still work as aliases.');
 }

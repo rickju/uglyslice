@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// SQLite store for raw Overpass API responses.
@@ -17,7 +18,14 @@ class RawJsonStore {
     _ffiInitialised = true;
   }
 
-  RawJsonStore({String? path}) : dbPath = path ?? '/tmp/overpass_cache.db';
+  RawJsonStore({String? path}) : dbPath = path ?? _defaultPath();
+
+  static String _defaultPath() {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    final dir = Directory('$home/.ugly_slice');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return '${dir.path}/overpass_cache.db';
+  }
 
   Future<Database> _open() async {
     if (_db != null) return _db!;
@@ -122,6 +130,29 @@ class RawJsonStore {
       ['%$query%'],
     );
     return rows.map((r) => r['name'] as String).toList();
+  }
+
+  /// Returns cache entries with metadata: name, latest fetch time, entry count,
+  /// and approximate JSON size. Sorted by fetch time descending.
+  /// Set [includeSystem] to also show bulk region keys (starting with __).
+  Future<List<Map<String, dynamic>>> cacheStatus(
+      {String? filter, bool includeSystem = false}) async {
+    final db = await _open();
+    final systemFilter = includeSystem ? '1=1' : _systemKeyFilter;
+    final whereClause = filter != null
+        ? "$systemFilter AND name LIKE '%$filter%'"
+        : systemFilter;
+    final rows = await db.rawQuery(
+      'SELECT name, '
+      '  COUNT(*) AS versions, '
+      '  MAX(fetched_at) AS last_fetched, '
+      '  LENGTH(raw_json) AS json_bytes '
+      'FROM overpass_cache '
+      'WHERE $whereClause '
+      'GROUP BY name '
+      'ORDER BY last_fetched DESC',
+    );
+    return rows.cast<Map<String, dynamic>>();
   }
 
   Future<void> close() async {
