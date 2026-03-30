@@ -77,6 +77,9 @@ Global singletons in `main.dart`: `db` (AppDatabase), `syncService`, `courseSync
 
 ### Data flow
 1. Course list loaded from `assets/nz-course-compact.json` (NZ courses)
+   -  Lazy populate — don't block the UI on sync and let the user see an empty list with a.  should: show nearest courses first. should: show progressively while only partial list returned.
+
+  "Fetching courses…" banner that updates in the background
 2. Detailed course geometry fetched from Overpass API and cached via Drift
 3. Round created locally → synced to Supabase via `syncable` package
 4. GPS position streamed via `geolocator`; Watch swing events via `WatchService`
