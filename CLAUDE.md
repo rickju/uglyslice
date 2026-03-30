@@ -72,14 +72,15 @@ Global singletons in `main.dart`: `db` (AppDatabase), `syncService`, `courseSync
 | `handicap_service.dart` | WHS Handicap Index calculation |
 
 ### Models
-- **`shared/`**: `Round`, `HolePlay`, `Shot`, `Club`, `Player` (shared with Watch)
-- **`app/lib/models/`**: `Course`, `Hole`, `Tee` (parsed from OSM), `Scorecard`
+- **`shared/`**: `HolePlay`, `Shot`, `Club`, `Player` (shared with Watch)
+- **`app/lib/models/`**: `Round`, `Course`, `Hole`, `Tee` (parsed from OSM), `Scorecard`
 
 ### Data flow
-1. Course list loaded from `assets/nz-course-compact.json` (NZ courses)
+1. Course list loaded from a local `assets/*.json` file (todo: file size concern?)
+
    -  Lazy populate — don't block the UI on sync and let the user see an empty list with a.  should: show nearest courses first. should: show progressively while only partial list returned.
 
-  "Fetching courses…" banner that updates in the background
+
 2. Detailed course geometry fetched from Overpass API and cached via Drift
 3. Round created locally → synced to Supabase via `syncable` package
 4. GPS position streamed via `geolocator`; Watch swing events via `WatchService`
@@ -118,7 +119,7 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 
 ## UI Guidelines
 
-- Material 3, dark theme. (but what about iOS style?) (and should we use iOS font size auto fitting?)
+- Material 3, dark theme
 - High contrast for outdoor visibility
 - Minimum 48×48 tap targets (glove-friendly)
 - Large score display on round page
@@ -131,26 +132,37 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - Use `debugPrint` for logging (stripped in release)
 
 
-## Unit test
+## Unit Tests
 
-- all features/key functions could be tested & verified headless without flutter app running
-- Test-First: Before refactoring logic, Claude MUST write/update a unit test 
-- Verify: After any edit, Claude MUST run `flutter test` on the affected file.
-- Error Handling: 
-  - UI must never crash
-  - Log errors. (maybe: a central `logger.dart` service? not sure)
+- All features and key functions should be testable headless (no Flutter app running)
+- Test-First: Before refactoring logic, write or update a unit test first
+- Verify: After any edit, run `flutter test` (in `app/`) to confirm tests pass
+- Destructive testing: try to crash the logic via invalid inputs, simulated network delays, or concurrent operations
+- Before modifying a feature, write failing unit tests covering edge cases (negative scores, empty input, out-of-range values), then implement until all tests pass
 
-## Backend
+## Error Handling
 
-- a backend daemon keep working on course info updating.
+- UI must never crash
+- Use `debugPrint` for logging (stripped in release builds)
 
-    - features: use AI and web search to find missing info (overpass data missing). like hole number, course ratings, hole handicap....
-    - web search: google searching, club official site can provide missing info
-    - AI: use a AI agent checking our DB data integrity. like hole/fairway/pin/tee location, size, boudary, and playing lines does not make sense 
-    - also: keep an eye on newly built course or closing courses
-    - keep overpass json change history (maybe git? or db?)
+## Backend (Planned — not yet implemented)
+
+A background daemon to keep course data up to date:
+
+- Use AI and web search to fill gaps in Overpass data (hole numbers, course ratings, hole handicaps)
+- Scrape official club websites for missing metadata
+- AI agent to validate DB data integrity (tee/fairway/pin locations, boundaries, playing lines)
+- Monitor for newly opened or closed courses
+- Track Overpass JSON change history
+
+## See Also
+
+Also check `db.md` and `tee-naming.md`.
+
+## Known Issues
+
+- with royal wellington, 27 holes. overpass json confused our parser. todo: make sure daemon and parser can work with similar complicated courses
+- todo: with overpass json, how to remove items that is a driver range or mini golf etc.
 
 
-## include
-    also check db.md and tee-naming.md
 
