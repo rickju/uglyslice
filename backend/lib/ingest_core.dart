@@ -210,11 +210,35 @@ Future<IngestAllResult> _ingestFromQueries({
   final elements = data['elements'] as List<dynamic>;
 
   const typePriority = {'relation': 0, 'way': 1, 'node': 2};
+
+  // OSM golf subtypes that are not real courses.
+  const nonCourseGolfTags = {
+    'driving_range', 'miniature', 'pitch_and_putt', 'practice', 'academy',
+  };
+
+  // Name keywords that indicate non-playable venues.
+  const junkNameKeywords = [
+    'driving range', 'mini golf', 'mini-golf', 'miniature golf',
+    'pitch & putt', 'pitch and putt', 'putting course', 'putting green',
+    'golf academy', 'practice center', 'practice centre',
+  ];
+
+  bool _isJunkElement(Map<String, dynamic> tags, String name) {
+    final golfTag = tags['golf'] as String?;
+    if (golfTag != null && nonCourseGolfTags.contains(golfTag)) return true;
+    final lower = name.toLowerCase();
+    return junkNameKeywords.any((k) => lower.contains(k));
+  }
+
   final Map<String, Map<String, dynamic>> byName = {};
   for (final el in elements) {
     final tags = (el['tags'] as Map<String, dynamic>?) ?? {};
     final name = (tags['name'] as String?)?.trim();
     if (name == null || name.isEmpty) continue;
+    if (_isJunkElement(tags, name)) {
+      print('  Skipping non-course: "$name"');
+      continue;
+    }
 
     final type = el['type'] as String;
     final center = el['center'] as Map<String, dynamic>?;

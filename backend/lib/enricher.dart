@@ -19,11 +19,18 @@ class Enricher {
         _claude = claude ?? ClaudeClient(),
         _supabase = supabase ?? SupabaseRestClient();
 
+  /// Enrich a single course directly by courseId + name, bypassing the queue.
+  Future<void> enrichOne(String courseId, String courseName) async {
+    print('Enriching: $courseName ($courseId)');
+    await _enrichCourse(courseId, courseName, []);
+    print('  → Done ✓');
+  }
+
   /// Process up to [batchSize] pending items from `enrich_queue`.
   Future<void> processQueue({int batchSize = 10, bool dryRun = false}) async {
     final rows = await _supabase.select(
       'enrich_queue',
-      filters: 'status=eq.pending',
+      filters: 'status=eq.pending&order=id.asc',
       columns: 'id,course_id,course_name,fields',
     );
 
@@ -233,6 +240,21 @@ class Enricher {
       print('  → Applied course par: $totalPar');
     }
 
+    // --- total_holes + course_layouts ---
+    final totalHoles = extracted['total_holes'];
+    if (totalHoles is num && totalHoles >= 9) {
+      coursePatch['totalHoles'] = totalHoles.toInt();
+      courseChanged = true;
+      print('  → Applied total holes: $totalHoles');
+    }
+    final layouts = extracted['course_layouts'];
+    if (layouts is List && layouts.isNotEmpty) {
+      coursePatch['courseLayouts'] = layouts;
+      courseChanged = true;
+      final names = (layouts).map((l) => '${l['name']} (${l['holes']}h)').join(', ');
+      print('  → Applied course layouts: $names');
+    }
+
     if (!holesChanged && !courseChanged) {
       throw Exception('No valid data extracted');
     }
@@ -254,10 +276,14 @@ You are extracting golf course data from a club website for "$courseName" ($hole
 
 From the text below, extract as much as you can find and return a JSON object with these fields (omit any you cannot find — do NOT guess):
 
+- "total_holes": integer — total number of holes across all courses/loops at this venue (e.g. 18, 27, 36)
+- "course_layouts": array of objects, one per distinct course/loop, each with:
+    "name" (string e.g. "Championship", "President's Course", "East", "West"),
+    "holes" (integer — number of holes in this layout)
 - "hole_handicaps": array of $holeCount integers — stroke index / handicap index per hole (1 = hardest)
 - "hole_pars": array of $holeCount integers — par value per hole (3, 4, or 5)
 - "hole_yardages": array of $holeCount integers — yardage per hole from the longest/championship tee
-- "course_par": integer — total par for the course (e.g. 70, 71, 72)
+- "course_par": integer — total par for the main/championship course (e.g. 70, 71, 72)
 - "tee_ratings": array of objects, one per tee, each with:
     "name" (string e.g. "White", "Yellow", "Red"),
     "yardage" (total yards, integer),

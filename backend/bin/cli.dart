@@ -7,6 +7,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:ugly_slice_backend/enricher.dart';
 import 'package:ugly_slice_backend/ingest_core.dart';
 import 'package:ugly_slice_backend/raw_json_store.dart';
 import 'package:ugly_slice_backend/supabase_client.dart';
@@ -77,11 +78,75 @@ Future<void> main(List<String> args) async {
     case 'list-courses':
       await listCachedCourses();
 
+    case 'enrich-course':
+      final name = args.length >= 2 ? args[1] : await _pickCourseName();
+      if (name == null) exit(1);
+      await _enrichOneCourse(name);
+
+    case 'delete-course':
+      final name = args.length >= 2 ? args[1] : await _pickCourseName();
+      if (name == null) exit(1);
+      await _deleteCourse(name, dryRun: args.contains('--dry-run'));
+
+    case 'cleanup-junk':
+      await _cleanupJunk(dryRun: args.contains('--dry-run'));
+
+    case 'reingest-incomplete':
+      final limitArg = args.indexOf('--limit');
+      final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
+      final threshArg = args.indexOf('--min-holes');
+      final minHoles = threshArg != -1 ? int.tryParse(args[threshArg + 1]) ?? 9 : 9;
+      final region = args.contains('--region')
+          ? args[args.indexOf('--region') + 1]
+          : 'New Zealand';
+      await _reingestIncomplete(region: region, minHoles: minHoles, limit: limit);
+
     default:
       print('Unknown command: ${args[0]}');
       _usage();
       exit(1);
   }
+}
+
+// ── Enrich one course by name ─────────────────────────────────────────────────
+
+Future<void> _enrichOneCourse(String name) async {
+  final supabase = SupabaseRestClient();
+
+  // Look up course_id from Supabase.
+  final rows = await supabase.select('courses', filters: 'name=eq.$name', columns: 'id');
+  if (rows.isEmpty) {
+    print('Course "$name" not found in Supabase. Run ingest-course first.');
+    exit(1);
+  }
+  final courseId = rows.first['id'] as String;
+
+  // Ensure there's a pending queue entry (upsert if missing).
+  final existing = await supabase.select('enrich_queue',
+      filters: 'course_id=eq.$courseId', columns: 'id,status');
+  if (existing.isEmpty) {
+    await supabase.insert('enrich_queue', [
+      {
+        'course_id': courseId,
+        'course_name': name,
+        'fields': ['hole_handicaps', 'hole_pars', 'tee_ratings'],
+        'status': 'pending',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }
+    ]);
+    print('Added "$name" to enrich queue.');
+  } else {
+    await supabase.patch('enrich_queue', 'course_id=eq.$courseId', {
+      'status': 'pending',
+      'last_error': null,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+    print('Reset "$name" to pending.');
+  }
+
+  // Enrich directly — no queue ordering issues.
+  final enricher = Enricher();
+  await enricher.enrichOne(courseId, name);
 }
 
 // ── Picker ────────────────────────────────────────────────────────────────────
@@ -278,6 +343,224 @@ void _saveRecent(String name) {
   _recentFile.writeAsStringSync(jsonEncode(recent));
 }
 
+// ── Delete / cleanup ──────────────────────────────────────────────────────────
+
+// ── Reingest incomplete courses ───────────────────────────────────────────────
+
+/// Re-ingests courses that have fewer than [minHoles] holes parsed.
+/// Fetches fresh Overpass data (ignores TTL cache) and reports progress.
+Future<void> _reingestIncomplete({
+  String region = 'New Zealand',
+  int minHoles = 9,
+  int? limit,
+}) async {
+  final supabase = SupabaseRestClient();
+
+  // Determine bbox for the region to filter course_list.
+  const nzBbox = 'lat=gte.-47.5&lat=lte.-34.0&lon=gte.166.0&lon=lte.179.0';
+  final bboxFilter = region == 'New Zealand' ? nzBbox : null;
+  if (bboxFilter == null) {
+    print('Error: only "New Zealand" region supported currently.');
+    exit(1);
+  }
+
+  // Get regional course names.
+  final listRows = await supabase.select(
+    'course_list',
+    filters: bboxFilter,
+    columns: 'name',
+  );
+  final regionalNames = {for (final r in listRows) r['name'] as String};
+  print('Region "$region": ${regionalNames.length} courses in course_list');
+
+  // Get all courses and find incomplete ones in this region.
+  final allRows = await supabase.select(
+    'courses',
+    columns: 'id,name,course_doc',
+  );
+
+  int getHoles(Map r) {
+    var doc = r['course_doc'];
+    if (doc is String) doc = jsonDecode(doc);
+    return (doc as Map?)?['holeCount'] as int? ?? 0;
+  }
+
+  final incomplete = allRows
+      .where((r) =>
+          regionalNames.contains(r['name'] as String) &&
+          getHoles(r) < minHoles)
+      .toList();
+
+  var toProcess = incomplete;
+  if (limit != null) toProcess = toProcess.take(limit).toList();
+
+  print('Incomplete (<$minHoles holes): ${incomplete.length}  processing: ${toProcess.length}');
+  print('');
+
+  int improved = 0, unchanged = 0, failed = 0;
+
+  for (int i = 0; i < toProcess.length; i++) {
+    final name = toProcess[i]['name'] as String;
+    final before = getHoles(toProcess[i]);
+    stdout.write('[${i + 1}/${toProcess.length}] $name ($before h) ... ');
+
+    try {
+      await ingestOneCourse(name);
+
+      // Check new hole count.
+      final updated = await supabase.select(
+        'courses',
+        filters: 'name=eq.${Uri.encodeComponent(name)}',
+        columns: 'course_doc',
+      );
+      final after = updated.isEmpty ? 0 : (() {
+        var doc = updated.first['course_doc'];
+        if (doc is String) doc = jsonDecode(doc);
+        return (doc as Map?)?['holeCount'] as int? ?? 0;
+      })();
+
+      if (after > before) {
+        print('$before → $after h ✓');
+        improved++;
+      } else {
+        print('still ${after}h (OSM unmapped)');
+        unchanged++;
+      }
+    } catch (e) {
+      print('FAILED: $e');
+      failed++;
+    }
+
+    // Polite delay to avoid hammering Overpass.
+    if (i < toProcess.length - 1) {
+      await Future.delayed(const Duration(seconds: 2));
+    }
+  }
+
+  print('');
+  print('Done — improved: $improved  unchanged: $unchanged  failed: $failed');
+}
+
+// ── Keywords that unambiguously identify non-playable venues ─────────────────
+
+/// Keywords that unambiguously identify non-playable venues.
+const _junkKeywords = [
+  'driving range',
+  'mini golf',
+  'mini-golf',
+  'pitch & putt',
+  'pitch and putt',
+  'putting course',
+  'putting green',
+  'golf academy',
+  'practice center',
+  'practice centre',
+];
+
+/// Exact names that are clearly not real golf courses (manual list).
+const _junkExact = [
+  'Golf Driving Range',
+  'Driving Range',
+  'Lilliput Mini Golf',
+  'Mini Golf NZ with Bunnies',
+  'Mini Golf',
+  'Shooters Golf Driving Range',
+  'Canterbury International Golf Academy',
+  'Golf Warehouse Driving Range',
+  '18 Hole Groomed Putting Course',
+  'Lake Taupō Hole in One Challenge',
+  'Whanga Putter',
+  'prodrive Golf',
+  'Ringa Ringa Heights',
+  'Golflands',
+  'Callum Brae Family Golf',
+  "Maxwell's Golf Retreat",
+  'Hole 11',
+];
+
+bool _isJunk(String name) {
+  final lower = name.toLowerCase();
+  if (_junkExact.any((e) => e.toLowerCase() == lower)) return true;
+  return _junkKeywords.any((k) => lower.contains(k));
+}
+
+Future<void> _deleteCourse(String name, {bool dryRun = false}) async {
+  final supabase = SupabaseRestClient();
+  final encoded = Uri.encodeComponent(name);
+
+  // Look up id first.
+  final rows = await supabase.select('courses', filters: 'name=eq.$encoded', columns: 'id');
+  if (rows.isEmpty) {
+    print('Course "$name" not found in courses table.');
+  } else {
+    final id = rows.first['id'] as String;
+    if (dryRun) {
+      print('[dry-run] Would delete courses/$id "$name"');
+    } else {
+      await supabase.delete('courses', 'id=eq.$id');
+      print('Deleted from courses: "$name" ($id)');
+    }
+  }
+
+  // Remove from course_list too.
+  final listRows = await supabase.select('course_list', filters: 'name=eq.$encoded', columns: 'id');
+  if (listRows.isEmpty) {
+    print('  (not in course_list)');
+  } else {
+    final listId = listRows.first['id'];
+    if (dryRun) {
+      print('[dry-run] Would delete course_list/$listId "$name"');
+    } else {
+      await supabase.delete('course_list', 'name=eq.$encoded');
+      print('Deleted from course_list: "$name"');
+    }
+  }
+}
+
+Future<void> _cleanupJunk({bool dryRun = false}) async {
+  final supabase = SupabaseRestClient();
+
+  // Fetch all course names.
+  final rows = await supabase.select('courses', columns: 'id,name');
+  final junk = rows.where((r) => _isJunk(r['name'] as String)).toList();
+
+  if (junk.isEmpty) {
+    print('No junk courses found.');
+    return;
+  }
+
+  print('Found ${junk.length} junk course(s):');
+  for (final r in junk) {
+    print('  ${r['id']}  ${r['name']}');
+  }
+  print('');
+
+  if (dryRun) {
+    print('[dry-run] No changes made. Re-run without --dry-run to delete.');
+    return;
+  }
+
+  // Confirm.
+  stdout.write('Delete all ${junk.length} course(s)? [y/N] ');
+  final input = stdin.readLineSync()?.trim().toLowerCase();
+  if (input != 'y') {
+    print('Aborted.');
+    return;
+  }
+
+  int deleted = 0;
+  for (final r in junk) {
+    final name = r['name'] as String;
+    final id = r['id'] as String;
+    final encoded = Uri.encodeComponent(name);
+    await supabase.delete('courses', 'id=eq.$id');
+    await supabase.delete('course_list', 'name=eq.$encoded');
+    print('  Deleted: "$name"');
+    deleted++;
+  }
+  print('\nDone — $deleted course(s) removed.');
+}
+
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
 void _usage() {
@@ -294,6 +577,13 @@ void _usage() {
   print('  list-courses                  List all course names in the local cache');
   print('  query-course  [name]          Query Supabase for a stored course and print details');
   print('  check-integrity [name]        Query Supabase and report integrity issues');
+  print('  enrich-course [name]          Web search + Claude extract → patch course in Supabase');
+  print('  delete-course [name] [--dry-run]  Remove a course from courses + course_list');
+  print('  cleanup-junk  [--dry-run]     Remove driving ranges, mini golf, etc.');
+  print('  reingest-incomplete           Re-fetch courses with <9 holes from Overpass');
+  print('    [--region <name>]           Region to filter (default: New Zealand)');
+  print('    [--min-holes N]             Hole threshold (default: 9)');
+  print('    [--limit N]                 Max courses to process');
   print('');
   print('Tip: omit [name] for an interactive picker (★ recent · sorted nearby · type to filter).');
 }

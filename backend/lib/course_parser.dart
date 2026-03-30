@@ -324,6 +324,29 @@ ParsedCourse _parseCourseFromWay(Overpass overpass, Way golfCourseWay) {
   }
   holes.sort((a, b) => a.holeNumber.compareTo(b.holeNumber));
 
+  // Handle duplicate hole ref numbers — this occurs when a course has multiple
+  // loops sharing the same numbering (e.g. 18-hole + 9-hole sharing refs 1–9).
+  // Renumber all holes sequentially 1..N so every hole is preserved.
+  final refCounts = <int, int>{};
+  for (final h in holes) refCounts[h.holeNumber] = (refCounts[h.holeNumber] ?? 0) + 1;
+  final hasDuplicates = refCounts.values.any((c) => c > 1);
+  if (hasDuplicates) {
+    for (int i = 0; i < holes.length; i++) {
+      final h = holes[i];
+      holes[i] = Hole(
+        holeNumber: i + 1,
+        par: h.par,
+        handicapIndex: h.handicapIndex,
+        pin: h.pin,
+        routingLine: h.routingLine,
+        teeBoxes: h.teeBoxes,
+        teePlatforms: h.teePlatforms,
+        fairways: h.fairways,
+        greens: h.greens,
+      );
+    }
+  }
+
   // Build padded bounding box polygons for hole assignment
   const pad = 0.0003;
   final Map<int, jts.Polygon?> holePolygons = {};
