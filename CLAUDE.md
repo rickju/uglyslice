@@ -145,15 +145,21 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - UI must never crash
 - Use `debugPrint` for logging (stripped in release builds)
 
-## Backend (Planned — not yet implemented)
+## Backend
 
 A background daemon to keep course data up to date:
 
-- Use AI and web search to fill gaps in Overpass data (hole numbers, course ratings, hole handicaps)
-- Scrape official club websites for missing metadata
-- AI agent to validate DB data integrity (tee/fairway/pin locations, boundaries, playing lines)
-- Monitor for newly opened or closed courses
-- Track Overpass JSON change history
+course data process passes: fetch, parse, enrich
+
+- fetch json from overpass
+- parse
+- coure integrity check
+- course enrich:
+	-- Use AI and web search to fill gaps in Overpass data (hole numbers, course ratings, hole handicaps)
+	- Scrape official club websites for missing metadata
+	- AI agent to validate DB data integrity (tee/fairway/pin locations, boundaries, playing lines)
+	- Monitor for newly opened or closed courses
+	- Track Overpass JSON change history
 
 ## See Also
 
@@ -162,6 +168,7 @@ Also check `db.md` and `tee-naming.md`.
 ## Known Issues
 
 - with royal wellington, 27 holes. overpass json confused our parser. todo: make sure daemon and parser can work with similar complicated courses
+- todo: many 9holes course, a 18hole play means play the 9holes twice. sometimes with different tee or green, sometime sharing. mostlikely sharing fairway. should: reflect this in our data structure?
 - todo: with overpass json, how to remove items that is a driver range or mini golf etc.
 
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:ugly_slice_backend/enricher.dart';
+import 'package:ugly_slice_backend/gemini_client.dart';
 import 'package:ugly_slice_backend/ingest_core.dart';
 import 'package:ugly_slice_backend/scheduler.dart';
 
@@ -24,6 +25,8 @@ Future<void> main(List<String> args) async {
   // --enrich-only: skip discover/ingest, only process the enrich queue.
   // Implied by --once to avoid hammering Overpass during development.
   final enrichOnly = args.contains('--enrich-only') || runOnce;
+  // --gemini: enable the Gemini hole-estimate pass inside the enrich job.
+  final useGemini = args.contains('--gemini');
 
   // --region <name>: restrict discover/ingest to a single named region.
   final regionIdx = args.indexOf('--region');
@@ -39,6 +42,7 @@ Future<void> main(List<String> args) async {
   print('  once        : $runOnce');
   print('  enrich-only : $enrichOnly');
   print('  regions     : ${enrichOnly ? "n/a" : activeRegions.join(", ")}');
+  print('  gemini      : $useGemini');
   print('');
 
   if (!enrichOnly) {
@@ -46,7 +50,7 @@ Future<void> main(List<String> args) async {
     await scheduler.runJob('ingest', () => _ingestJob(activeRegions, dryRun: dryRun));
     await scheduler.runJob('audit', () => _auditJob(dryRun: dryRun));
   }
-  await scheduler.runJob('enrich', () => _enrichJob(dryRun: dryRun));
+  await scheduler.runJob('enrich', () => _enrichJob(dryRun: dryRun, useGemini: useGemini));
 
   if (runOnce) {
     print('\nDone (--once mode).');
@@ -61,7 +65,7 @@ Future<void> main(List<String> args) async {
         () => _discoverJob(activeRegions, dryRun: dryRun));
   }
   scheduler.scheduleRecurring(
-      'enrich', const Duration(hours: 6), () => _enrichJob(dryRun: dryRun));
+      'enrich', const Duration(hours: 6), () => _enrichJob(dryRun: dryRun, useGemini: useGemini));
 
   print('Daemon running. Press Ctrl+C to stop.');
   // Keep process alive.
@@ -107,7 +111,7 @@ Future<void> _auditJob({bool dryRun = false}) async {
 }
 
 /// Process pending enrichment queue items.
-Future<void> _enrichJob({bool dryRun = false}) async {
-  final enricher = Enricher();
+Future<void> _enrichJob({bool dryRun = false, bool useGemini = false}) async {
+  final enricher = Enricher(gemini: useGemini ? GeminiClient() : null);
   await enricher.processQueue(batchSize: 20, dryRun: dryRun);
 }

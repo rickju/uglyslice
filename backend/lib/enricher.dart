@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'claude_client.dart';
+import 'gemini_client.dart';
 import 'supabase_client.dart';
 import 'web_search.dart';
 
@@ -9,14 +10,17 @@ import 'web_search.dart';
 class Enricher {
   final WebSearch _search;
   final ClaudeClient _claude;
+  final GeminiClient? _gemini;
   final SupabaseRestClient _supabase;
 
   Enricher({
     WebSearch? search,
     ClaudeClient? claude,
+    GeminiClient? gemini,
     SupabaseRestClient? supabase,
   })  : _search = search ?? WebSearch(),
         _claude = claude ?? ClaudeClient(),
+        _gemini = gemini,
         _supabase = supabase ?? SupabaseRestClient();
 
   /// Enrich a single course directly by courseId + name, bypassing the queue.
@@ -24,6 +28,77 @@ class Enricher {
     print('Enriching: $courseName ($courseId)');
     await _enrichCourse(courseId, courseName, []);
     print('  → Done ✓');
+  }
+
+  /// Run the Gemini hole-estimate pass on a single course, bypassing the queue.
+  /// Only writes to Supabase if the course currently has no holes.
+  Future<void> geminiEstimateOne(String courseId, String courseName,
+      {bool dryRun = false}) async {
+    print('Gemini estimate: $courseName ($courseId)');
+    final gemini = _gemini ?? GeminiClient();
+
+    final courseRows = await _supabase.select(
+      'courses',
+      filters: 'id=eq.$courseId',
+      columns: 'course_doc,holes_doc',
+    );
+    if (courseRows.isEmpty) throw Exception('Course not found in Supabase');
+
+    final courseDoc = courseRows.first['course_doc'] is String
+        ? jsonDecode(courseRows.first['course_doc'] as String)
+            as Map<String, dynamic>
+        : courseRows.first['course_doc'] as Map<String, dynamic>;
+    final holeDocs = courseRows.first['holes_doc'] is String
+        ? (jsonDecode(courseRows.first['holes_doc'] as String) as List<dynamic>)
+            .cast<Map<String, dynamic>>()
+        : (courseRows.first['holes_doc'] as List<dynamic>)
+            .cast<Map<String, dynamic>>();
+
+    if (holeDocs.isNotEmpty) {
+      print('  → Already has ${holeDocs.length} holes — skipping');
+      return;
+    }
+
+    final estimated =
+        await _geminiHoleEstimatePass(courseName, courseDoc, gemini: gemini);
+    if (estimated == null) throw Exception('Gemini returned no valid estimate');
+
+    print('  → Estimated ${estimated.length} holes');
+    if (dryRun) {
+      print('  → dry run — not writing to Supabase');
+      return;
+    }
+    await _supabase.patch('courses', 'id=eq.$courseId', {
+      'holes_doc': estimated,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+    print('  → Done ✓');
+  }
+
+  /// Run Gemini hole estimates for all courses with no holes in Supabase.
+  Future<void> geminiEstimateAll({bool dryRun = false}) async {
+    final rows = await _supabase.select(
+      'courses',
+      filters: 'holes_doc=eq.[]',
+      columns: 'id,course_doc',
+    );
+    if (rows.isEmpty) {
+      print('Gemini pass: no courses with empty holes_doc');
+      return;
+    }
+    print('Gemini pass: ${rows.length} course(s) with no holes');
+    for (final row in rows) {
+      final courseId = row['id'] as String;
+      final courseDoc = row['course_doc'] is String
+          ? jsonDecode(row['course_doc'] as String) as Map<String, dynamic>
+          : row['course_doc'] as Map<String, dynamic>;
+      final courseName = courseDoc['name'] as String? ?? courseId;
+      try {
+        await geminiEstimateOne(courseId, courseName, dryRun: dryRun);
+      } catch (e) {
+        print('  → $courseName FAILED: $e');
+      }
+    }
   }
 
   /// Process up to [batchSize] pending items from `enrich_queue`.
@@ -105,11 +180,31 @@ class Enricher {
         ? jsonDecode(courseRows.first['course_doc'] as String)
             as Map<String, dynamic>
         : courseRows.first['course_doc'] as Map<String, dynamic>;
-    final holeDocs = courseRows.first['holes_doc'] is String
+    var holeDocs = courseRows.first['holes_doc'] is String
         ? (jsonDecode(courseRows.first['holes_doc'] as String) as List<dynamic>)
             .cast<Map<String, dynamic>>()
         : (courseRows.first['holes_doc'] as List<dynamic>)
             .cast<Map<String, dynamic>>();
+
+    // 1b. Gemini hole-skeleton pass — only when OSM produced no holes at all
+    //     and a GeminiClient was provided.
+    if (holeDocs.isEmpty && _gemini != null) {
+      print('  → No holes in OSM data — running Gemini hole-estimate pass');
+      final estimated = await _geminiHoleEstimatePass(courseName, courseDoc);
+      if (estimated != null) {
+        holeDocs = estimated;
+        final now = DateTime.now().toUtc().toIso8601String();
+        await _supabase.patch(
+          'courses',
+          'id=eq.$courseId',
+          {'holes_doc': holeDocs, 'updated_at': now},
+        );
+        print('  → Gemini estimated ${holeDocs.length} holes (marked estimated)');
+      } else {
+        print('  → Gemini hole estimate failed — skipping enrichment');
+        return;
+      }
+    }
 
     final holeCount = holeDocs.length;
 
@@ -389,4 +484,109 @@ $pageText''';
     }
     return n; // fallback: use name as color
   }
+
+  /// Ask Gemini to estimate a hole skeleton for a course with no OSM hole data.
+  /// Returns a list of holeDocs (each marked `estimated: true`) or null on failure.
+  Future<List<Map<String, dynamic>>?> _geminiHoleEstimatePass(
+      String courseName, Map<String, dynamic> courseDoc,
+      {GeminiClient? gemini}) async {
+    gemini ??= _gemini;
+    if (gemini == null) return null;
+    final centre = _boundaryCentre(courseDoc);
+    final locationHint = centre != null
+        ? 'The course boundary centre is approximately ${centre.$1.toStringAsFixed(5)}, ${centre.$2.toStringAsFixed(5)} (lat, lng).'
+        : 'The course is in New Zealand.';
+
+    final prompt = '''
+You are a golf course data assistant. The course "$courseName" in New Zealand has no hole geometry in OpenStreetMap.
+$locationHint
+
+Estimate the layout and return a JSON array with one object per hole. Use 9 holes if this is likely a 9-hole course, otherwise 18.
+
+Each hole object must have:
+- "holeNumber": integer (1-based)
+- "par": integer (3, 4, or 5)
+- "handicapIndex": integer (1 to holeCount, each unique)
+- "tee": {"lat": float, "lng": float} — estimated tee position
+- "pin": {"lat": float, "lng": float} — estimated green/pin position
+- "estimated": true
+
+Place tee and pin coordinates near the boundary centre. Space holes plausibly within ~500m of the centre.
+Return ONLY a valid JSON array. Do not add explanations.
+''';
+
+    try {
+      final result = await gemini.completeJson(prompt, maxTokens: 3000);
+      if (result is! List) return null;
+
+      final holes = result.cast<Map<String, dynamic>>();
+      final holeCount = holes.length;
+      if (holeCount != 9 && holeCount != 18) return null;
+
+      // Validate structure and handicap uniqueness.
+      final handicaps = <int>{};
+      for (final h in holes) {
+        final par = h['par'];
+        final hi = h['handicapIndex'];
+        final tee = h['tee'];
+        final pin = h['pin'];
+        if (par is! num || par < 3 || par > 5) return null;
+        if (hi is! num || hi < 1 || hi > holeCount) return null;
+        if (!handicaps.add(hi.toInt())) return null; // duplicate
+        if (tee is! Map || pin is! Map) return null;
+        if (tee['lat'] == null || tee['lng'] == null) return null;
+        if (pin['lat'] == null || pin['lng'] == null) return null;
+      }
+
+      // Normalise into the standard holeDoc shape.
+      return holes.map((h) {
+        final tee = h['tee'] as Map;
+        final pin = h['pin'] as Map;
+        return {
+          'holeNumber': (h['holeNumber'] as num).toInt(),
+          'par': (h['par'] as num).toInt(),
+          'handicapIndex': (h['handicapIndex'] as num).toInt(),
+          'pin': {
+            'lat': (pin['lat'] as num).toDouble(),
+            'lng': (pin['lng'] as num).toDouble(),
+          },
+          'teeBoxes': [
+            {
+              'lat': (tee['lat'] as num).toDouble(),
+              'lng': (tee['lng'] as num).toDouble(),
+            }
+          ],
+          'routingLine': [],
+          'teePlatforms': [],
+          'fairways': [],
+          'greens': [],
+          'estimated': true,
+        };
+      }).toList();
+    } catch (e) {
+      print('  → Gemini hole estimate error: $e');
+      return null;
+    }
+  }
+
+  /// Returns the (lat, lng) centroid of the course boundary polygon, or null.
+  (double, double)? _boundaryCentre(Map<String, dynamic> courseDoc) {
+    final points = courseDoc['boundaryPoints'];
+    if (points is! List || points.isEmpty) return null;
+    double sumLat = 0, sumLng = 0;
+    int count = 0;
+    for (final p in points) {
+      if (p is! Map) continue;
+      final lat = p['lat'];
+      final lng = p['lng'];
+      if (lat is num && lng is num) {
+        sumLat += lat.toDouble();
+        sumLng += lng.toDouble();
+        count++;
+      }
+    }
+    if (count == 0) return null;
+    return (sumLat / count, sumLng / count);
+  }
+
 }
