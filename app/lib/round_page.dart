@@ -191,9 +191,11 @@ class _RoundPageState extends State<RoundPage> {
     }
 
     int? distFront, distPin, distBack;
+    double? pinBearing; // degrees clockwise from north, player → pin
     if (_round!.course.holes.isNotEmpty && _currentPlayerPos != null) {
       final hole = _round!.course.holes[_currentHoleIndex];
       final pos = _currentPlayerPos!;
+      pinBearing = const Distance().bearing(pos, hole.pin);
       final dist = const Distance();
 
       distPin = (dist.as(LengthUnit.Meter, pos, hole.pin) * 1.09361).round();
@@ -500,6 +502,15 @@ class _RoundPageState extends State<RoundPage> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (pinBearing != null)
+                          Transform.rotate(
+                            angle: pinBearing * pi / 180,
+                            child: const Icon(
+                              Icons.navigation,
+                              color: Colors.greenAccent,
+                              size: 22,
+                            ),
+                          ),
                         if (distBack != null)
                           _DistRow(label: 'B', value: distBack!, color: Colors.white70),
                         _DistRow(label: 'P', value: distPin ?? 0, color: Colors.greenAccent),
