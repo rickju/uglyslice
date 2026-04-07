@@ -140,6 +140,12 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - Destructive testing: try to crash the logic via invalid inputs, simulated network delays, or concurrent operations
 - Before modifying a feature, write failing unit tests covering edge cases (negative scores, empty input, out-of-range values), then implement until all tests pass
 
+
+
+- unit test: from the point view of a user, without flutter ui, set up different scenarios, and check the result of our logic. i want to freely define/add/custom scenario in the future. I want to separate flutter view from our logic, so the unit test can check the result of core logic. like all numbers presented to the user 
+  -- a ViewModel layer — pure Dart classes that hold all  display logic, extracted out of the Flutter widgets. Widgets just render what the VM  exposes.            
+
+
 ## Error Handling
 
 - UI must never crash

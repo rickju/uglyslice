@@ -255,9 +255,6 @@ class _CourseSelectionPageState extends State<CourseSelectionPage> {
                     distLabel = km < 1 ? '<1 km' : '${km.round()} km';
                   }
                   return ListTile(
-                    leading: recent
-                        ? const Icon(Icons.history, size: 18, color: Colors.amber)
-                        : null,
                     title: Text(course.name),
                     trailing: distLabel != null
                         ? Text(distLabel,

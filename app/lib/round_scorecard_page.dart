@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'models/round.dart';
 import 'services/course_repository.dart';
+import 'viewmodels/scorecard_view_model.dart';
+import 'viewmodels/display_models.dart';
 import 'main.dart' show db;
 
 class RoundScorecardPage extends StatefulWidget {
@@ -31,80 +33,13 @@ class _RoundScorecardPageState extends State<RoundScorecardPage> {
     });
   }
 
-  // ── Stat helpers ─────────────────────────────────────────────────────────
-
-  int _putts(HolePlay hp) => hp.shots
-      .where((s) => s.club?.type == ClubType.putter || s.lieType == LieType.green)
-      .length;
-
-  /// true = hit green in regulation (first putt at shot index ≤ par-2).
-  bool? _gir(HolePlay hp, int par) {
-    if (par == 0) return null;
-    final idx = hp.shots.indexWhere(
-        (s) => s.club?.type == ClubType.putter || s.lieType == LieType.green);
-    if (idx < 0) return false;
-    return idx <= par - 2;
-  }
-
-  /// true/false for par 4+5, null for par 3.
-  bool? _fir(HolePlay hp, int par) {
-    if (par < 4) return null;
-    if (hp.shots.length < 2) return null;
-    return hp.shots[1].lieType == LieType.fairway;
-  }
-
-  String _clubs(HolePlay hp) {
-    final labels = hp.shots
-        .map((s) => s.club == null ? '?' : _clubLabel(s.club!))
-        .toList();
-    // Collapse consecutive putters into e.g. "2Pu"
-    final collapsed = <String>[];
-    for (final l in labels) {
-      if (collapsed.isNotEmpty && collapsed.last.endsWith('Pu') && l == 'Pu') {
-        final prev = collapsed.removeLast();
-        final n = int.tryParse(prev.replaceAll('Pu', '')) ?? 1;
-        collapsed.add('${n + 1}Pu');
-      } else {
-        collapsed.add(l);
-      }
-    }
-    return collapsed.join('·');
-  }
-
-  String _clubLabel(Club club) {
-    switch (club.type) {
-      case ClubType.driver:  return 'Dr';
-      case ClubType.wood:    return '${club.number}w';
-      case ClubType.hybrid:  return '${club.number}h';
-      case ClubType.putter:  return 'Pu';
-      case ClubType.iron:
-        if (club.name == 'LW') return 'LW';
-        if (club.name == 'SW') return 'SW';
-        if (club.name == 'GW') return 'GW';
-        if (club.name == 'PW') return 'PW';
-        return '${club.number}i';
-      default:
-        return club.number.isNotEmpty ? '${club.number}i' : '?';
-    }
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final holePlays = widget.round.holePlays;
-    final totalScore = holePlays.fold(0, (s, hp) => s + hp.score);
-    final totalPar = _pars.values.fold(0, (s, p) => s + p);
-    final diff = totalPar > 0 ? totalScore - totalPar : null;
-    final totalPutts = holePlays.fold(0, (s, hp) => s + _putts(hp));
-
-    final girList = holePlays.map((hp) => _gir(hp, _pars[hp.holeNumber] ?? 0));
-    final girHit = girList.where((v) => v == true).length;
-    final girTotal = girList.where((v) => v != null).length;
-
-    final firList = holePlays.map((hp) => _fir(hp, _pars[hp.holeNumber] ?? 0));
-    final firHit = firList.where((v) => v == true).length;
-    final firTotal = firList.where((v) => v != null).length;
+    final rows    = ScorecardViewModel.buildRows(holePlays: holePlays, pars: _pars);
+    final summary = ScorecardViewModel.buildSummary(holePlays: holePlays, pars: _pars);
 
     final date = widget.round.date;
     final dateStr = '${date.day} ${_month(date.month)} ${date.year}';
@@ -132,22 +67,13 @@ class _RoundScorecardPageState extends State<RoundScorecardPage> {
                   defaultColumnWidth: const IntrinsicColumnWidth(),
                   children: [
                     _headerRow(),
-                    ...holePlays.map((hp) => _holeRow(hp)),
+                    ...rows.map((row) => _holeRow(row)),
                   ],
                 ),
               ),
             ),
           ),
-          _footer(
-            totalScore: totalScore,
-            totalPar: totalPar,
-            diff: diff,
-            totalPutts: totalPutts,
-            girHit: girHit,
-            girTotal: girTotal,
-            firHit: firHit,
-            firTotal: firTotal,
-          ),
+          _footer(summary),
         ],
       ),
     );
@@ -167,71 +93,52 @@ class _RoundScorecardPageState extends State<RoundScorecardPage> {
         ],
       );
 
-  TableRow _holeRow(HolePlay hp) {
-    final par   = _pars[hp.holeNumber] ?? 0;
-    final score = hp.score;
-    final rel   = par > 0 ? score - par : null;
-    final putts = _putts(hp);
-    final gir   = _gir(hp, par);
-    final fir   = _fir(hp, par);
-
+  TableRow _holeRow(ScorecardRow row) {
     return TableRow(
       decoration: BoxDecoration(
-        color: hp.holeNumber.isEven ? Colors.grey[900] : Colors.grey[850],
+        color: row.holeNumber.isEven ? Colors.grey[900] : Colors.grey[850],
       ),
       children: [
-        _Cell('${hp.holeNumber}'),
-        _Cell(par > 0 ? '$par' : '-'),
-        _Cell('$score', bold: true),
+        _Cell('${row.holeNumber}'),
+        _Cell(row.par != null && row.par! > 0 ? '${row.par}' : '-'),
+        _Cell('${row.score}', bold: true),
         _Cell(
-          rel == null ? '-' : rel == 0 ? 'E' : '${rel > 0 ? '+' : ''}$rel',
-          color: _relColor(rel),
+          ScorecardViewModel.relDisplay(row.relToPar),
+          color: _relColor(row.relToPar),
           bold: true,
         ),
-        _Cell(score > 0 ? '$putts' : '-'),
+        _Cell(row.score > 0 ? '${row.putts}' : '-'),
         _Cell(
-          gir == null ? '-' : gir ? '✓' : '✗',
-          color: gir == null ? null : gir ? Colors.green[300] : Colors.red[300],
+          row.gir == null ? '-' : row.gir! ? '✓' : '✗',
+          color: row.gir == null ? null : row.gir! ? Colors.green[300] : Colors.red[300],
         ),
         _Cell(
-          fir == null ? '-' : fir ? '✓' : '✗',
-          color: fir == null ? null : fir ? Colors.green[300] : Colors.red[300],
+          row.fir == null ? '-' : row.fir! ? '✓' : '✗',
+          color: row.fir == null ? null : row.fir! ? Colors.green[300] : Colors.red[300],
         ),
-        _Cell(score > 0 ? _clubs(hp) : '-', left: true),
+        _Cell(row.score > 0 ? row.clubs : '-', left: true),
       ],
     );
   }
 
-  Widget _footer({
-    required int totalScore,
-    required int totalPar,
-    required int? diff,
-    required int totalPutts,
-    required int girHit,
-    required int girTotal,
-    required int firHit,
-    required int firTotal,
-  }) {
-    String pct(int hit, int total) =>
-        total > 0 ? '${(hit / total * 100).round()}%' : '-';
-
+  Widget _footer(ScorecardSummary s) {
     return Container(
       color: Colors.grey[900],
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _FooterStat(label: 'Score', value: '$totalScore'),
-          if (totalPar > 0) _FooterStat(label: 'Par', value: '$totalPar'),
-          if (diff != null)
+          _FooterStat(label: 'Score', value: '${s.totalScore}'),
+          if (s.totalPar > 0) _FooterStat(label: 'Par', value: '${s.totalPar}'),
+          if (s.totalRelToPar != null)
             _FooterStat(
               label: 'Result',
-              value: diff == 0 ? 'E' : '${diff > 0 ? '+' : ''}$diff',
-              valueColor: _relColor(diff),
+              value: ScorecardViewModel.relDisplay(s.totalRelToPar),
+              valueColor: _relColor(s.totalRelToPar),
             ),
-          _FooterStat(label: 'Putts', value: '$totalPutts'),
-          _FooterStat(label: 'GIR', value: pct(girHit, girTotal)),
-          _FooterStat(label: 'FIR', value: pct(firHit, firTotal)),
+          _FooterStat(label: 'Putts', value: '${s.totalPutts}'),
+          _FooterStat(label: 'GIR', value: s.girPct),
+          _FooterStat(label: 'FIR', value: s.firPct),
         ],
       ),
     );
