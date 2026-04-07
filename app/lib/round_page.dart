@@ -10,7 +10,6 @@ import 'services/course_repository.dart';
 import 'services/round_repository.dart';
 import 'services/watch_service.dart';
 import 'round_scorecard_page.dart';
-import 'viewmodels/round_view_model.dart';
 import 'main.dart' show db;
 
 // page widget
@@ -191,14 +190,32 @@ class _RoundPageState extends State<RoundPage> {
       );
     }
 
-    final _distDisplay = RoundViewModel.computeDistances(
-      holes: _round!.course.holes,
-      holeIndex: _currentHoleIndex,
-      playerPos: _currentPlayerPos,
-    );
-    final distPin   = _distDisplay?.distPin;
-    final distFront = _distDisplay?.distFront;
-    final distBack  = _distDisplay?.distBack;
+    int? distFront, distPin, distBack;
+    if (_round!.course.holes.isNotEmpty && _currentPlayerPos != null) {
+      final hole = _round!.course.holes[_currentHoleIndex];
+      final pos = _currentPlayerPos!;
+      final dist = const Distance();
+
+      distPin = (dist.as(LengthUnit.Meter, pos, hole.pin) * 1.09361).round();
+
+      // Front = green polygon point closest to player
+      // Back  = green polygon point farthest from player
+      // Filter to points within 60m of pin to exclude outlier polygon nodes.
+      final greenPoints = hole.greens
+          .expand((g) => g.points)
+          .where((pt) => dist.as(LengthUnit.Meter, hole.pin, pt) < 60)
+          .toList();
+      if (greenPoints.isNotEmpty) {
+        double minM = double.infinity, maxM = 0;
+        for (final pt in greenPoints) {
+          final m = dist.as(LengthUnit.Meter, pos, pt);
+          if (m < minM) minM = m;
+          if (m > maxM) maxM = m;
+        }
+        distFront = (minM * 1.09361).round();
+        distBack  = (maxM * 1.09361).round();
+      }
+    }
 
     return Scaffold(
       body: Stack(
@@ -390,10 +407,15 @@ class _RoundPageState extends State<RoundPage> {
                           width: 48,
                           height: 20,
                           child: _DistanceLabel(
-                            yards: RoundViewModel.shotDistanceYards(
-                              _committedShotPositions[i] ?? shot.startLocation,
-                              _committedShotPositions[i + 1] ?? shot.endLocation!,
-                            ),
+                            yards: (const Distance().as(
+                                      LengthUnit.Meter,
+                                      _committedShotPositions[i] ??
+                                          shot.startLocation,
+                                      _committedShotPositions[i + 1] ??
+                                          shot.endLocation!,
+                                    ) *
+                                    1.09361)
+                                .round(),
                           ),
                         ),
                   ],
