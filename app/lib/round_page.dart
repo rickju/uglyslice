@@ -343,7 +343,7 @@ class _RoundPageState extends State<RoundPage> {
                       width: 40,
                       height: 40,
                       rotate: true,
-                      child: const Icon(Icons.golf_course, color: Colors.red, size: 30),
+                      child: const Icon(Icons.flag, color: Colors.red, size: 20),
                     ),
                   ],
                 ),
