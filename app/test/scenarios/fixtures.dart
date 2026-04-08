@@ -169,3 +169,65 @@ HolePlay doubleBogeyMissedFir({int holeNumber = 1}) => makeHolePlay(
 /// Empty hole — no shots recorded.
 HolePlay emptyHole({int holeNumber = 1}) =>
     makeHolePlay(holeNumber: holeNumber, shots: []);
+
+// ── 18-hole generic course ────────────────────────────────────────────────────
+
+/// Standard par layout mirroring a typical 18-hole course (total par 72).
+/// Holes are indexed 0-17; holeNumber = index + 1.
+const kGenericPars = [
+  4, 3, 4, 5, 4, 4, 3, // H1-H7 = 27
+  4, 5, 4, 3, 4, 5, 4, 4, 3, 4, 5, // H8-H18 = 45
+]; // total = 72
+
+/// Returns a minimal 18-hole course using [kGenericPars].
+/// No green polygons — distance assertions not meaningful here.
+List<Hole> makeGeneric18HoleCourse() => List.generate(
+      18,
+      (i) => makeHole(number: i + 1, par: kGenericPars[i]),
+    );
+
+/// Par layout for a typical 9-hole course (total par 36).
+const kGeneric9HolePars = [4, 3, 4, 5, 4, 4, 3, 4, 5]; // total = 36
+
+/// Returns a minimal 9-hole course using [kGeneric9HolePars].
+List<Hole> makeGeneric9HoleCourse() => List.generate(
+      9,
+      (i) => makeHole(number: i + 1, par: kGeneric9HolePars[i]),
+    );
+
+/// Par layout for an 18-hole par-71 course (3 par 5s, 4 par 3s, 11 par 4s).
+/// Same as kGenericPars but H13 changed par 5 → par 4. Total = 71.
+const kGenericPar71Pars = [
+  4, 3, 4, 5, 4, 4, 3, // H1-H7 = 27
+  4, 5, 4, 3, 4, 4, 4, 4, 3, 4, 5, // H8-H18 = 44
+]; // total = 71
+
+/// Returns a minimal 18-hole par-71 course using [kGenericPar71Pars].
+List<Hole> makeGenericPar71Course() => List.generate(
+      18,
+      (i) => makeHole(number: i + 1, par: kGenericPar71Pars[i]),
+    );
+
+/// Builds a [HolePlay] for [holeNumber] with [score] shots.
+///
+/// Shot pattern:
+///   - Last 2 shots: green lie (putts)
+///   - All earlier shots: fairway lie (non-putts), first shot is tee shot
+///
+/// This gives deterministic GIR/FIR results for testing:
+///   - GIR true  when score <= par  (first green shot at index score-2 ≤ par-2)
+///   - GIR false when score > par
+///   - FIR true  when score >= 4 on par-4+ (shot[1] is fairway; birdies score=3 give FIR=false)
+///   - FIR null  for par 3
+HolePlay holePlayForScore(int holeNumber, int par, int score) {
+  assert(score > 0, 'score must be at least 1');
+  final puttsCount = score >= 2 ? 2 : 1;
+  final nonPutts = score - puttsCount;
+  final shots = <Shot>[
+    for (int i = 0; i < nonPutts; i++)
+      makeShot(lieType: LieType.fairway, isTeeShot: i == 0),
+    for (int i = 0; i < puttsCount; i++)
+      makeShot(lieType: LieType.green, club: makePutter()),
+  ];
+  return makeHolePlay(holeNumber: holeNumber, shots: shots);
+}

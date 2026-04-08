@@ -65,7 +65,9 @@ void main() {
       expect(await repo.listCourses(), isEmpty);
     });
 
-    test('results are sorted alphabetically by name', () async {
+    test('falls back to alphabetical order when no location or recent courses', () async {
+      // listCourses() sorts: recent first → nearby (if lat/lon given) → alpha.
+      // With no lat/lon and an empty RecentCourses cache the fallback is alpha.
       await _seedCourses(db, [
         {'id': 1, 'type': 'way', 'name': 'Zebra GC',  'lat': -41.0, 'lon': 174.0},
         {'id': 2, 'type': 'way', 'name': 'Alpha GC',  'lat': -41.1, 'lon': 174.1},
