@@ -1,12 +1,8 @@
-# CLAUDE.md
-
-Guidance for Claude Code when working in this repository.
-
 ## Project Overview
 
 **ugly-slice** — Flutter golf tracking app for Android and iOS.
 
-Helps golfers track rounds, view course maps (OpenStreetMap/Overpass API), record shots with GPS, detect swings via Apple Watch, and calculate WHS handicap.
+Helps golfers track rounds, view course maps (OpenStreetMap/Overpass API), record shots with GPS, detect swings via Apple Watch or android watch, and calculate WHS handicap.
 
 - **Testing**: use location Wellington, NZ (Karori GC). use linux desktop app.
 - **Target market**: Global
