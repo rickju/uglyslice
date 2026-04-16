@@ -1,5 +1,4 @@
 import 'package:drift/drift.dart';
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../database/app_database.dart';
@@ -72,7 +71,7 @@ class CourseSyncService {
             .toList();
         await repo.saveCourse(r['id'] as String, courseDoc, holeDocs);
       } catch (e) {
-        debugPrint('CourseSyncService: failed to save course ${r['id']}: $e');
+        print('CourseSyncService: failed to save course ${r['id']}: $e');
       }
     }
   }

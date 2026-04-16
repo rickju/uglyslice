@@ -6,7 +6,7 @@
 // Assertions are computed from the course + scoring function, so there are no
 // hardcoded expected values that need updating when you add courses or scenarios.
 
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 import 'package:ugly_slice/models/course.dart';
 import 'package:ugly_slice/viewmodels/round_view_model.dart';
 import 'package:ugly_slice/viewmodels/scorecard_view_model.dart';

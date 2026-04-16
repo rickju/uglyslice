@@ -10,7 +10,7 @@
 // Play order: H8 → H9 → … → H18 → H1 → H2 → … → H7.
 // Scores: all at par except H8 and H1 (both bogeys → round total +2).
 
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 import 'package:ugly_slice/viewmodels/round_view_model.dart';
 import 'package:ugly_slice/viewmodels/scorecard_view_model.dart';
 

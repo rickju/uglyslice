@@ -4,7 +4,7 @@
 // All assertions check that the numbers shown to the user make sense —
 // no missing data, no obviously wrong distances, correct par and defaults.
 
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 import 'package:ugly_slice/viewmodels/display_models.dart';
 import 'package:ugly_slice/viewmodels/round_view_model.dart';
 import 'package:ugly_slice/viewmodels/scorecard_view_model.dart';

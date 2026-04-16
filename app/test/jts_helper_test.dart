@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:dart_jts/dart_jts.dart' as jts;
 import 'package:ugly_slice/models/jts.dart';

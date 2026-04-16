@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:math';
-import 'package:flutter/foundation.dart';
+
+import 'dart:io';
 
 import 'package:drift/drift.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+
+import '_docs_dir_stub.dart'
+    if (dart.library.ui) '_docs_dir_flutter.dart';
 
 import '../database/app_database.dart';
 
@@ -60,7 +62,7 @@ class CourseListRepository {
       if (lat != null) return dist(a).compareTo(dist(b));
       return a.name.compareTo(b.name);
     });
-    debugPrint('_sorted: lat=$lat lon=$lon recent=${recent.length} top3=${sorted.take(3).map((c) => c.name).join(', ')}');
+    print('_sorted: lat=$lat lon=$lon recent=${recent.length} top3=${sorted.take(3).map((c) => c.name).join(', ')}');
     return sorted;
   }
 }
@@ -94,7 +96,7 @@ class RecentCourses {
   }
 
   static Future<File> _file() async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getDocsDir();
     return File('${dir.path}/recent_courses.json');
   }
 }

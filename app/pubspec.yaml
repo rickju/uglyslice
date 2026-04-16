@@ -52,9 +52,15 @@ dependencies:
     path: ../shared
 
 
+dependency_overrides:
+  # path_provider_foundation 2.6.0 pulls in package:objective_c which causes
+  # flutter test to deadlock on macOS. Pin to 2.5.1 which uses pigeon instead.
+  path_provider_foundation: 2.5.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  test: any
   drift_dev: ^2.26.0
   build_runner: ^2.4.0
   flutter_launcher_icons: ^0.13.1

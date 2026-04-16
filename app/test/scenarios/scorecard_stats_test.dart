@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 import 'package:ugly_slice_shared/round_data.dart';
 import 'package:ugly_slice/viewmodels/scorecard_view_model.dart';
 
