@@ -10,28 +10,10 @@ Helps golfers track rounds, view course maps (OpenStreetMap/Overpass API), recor
 ## Repository Structure
 
 ```
-ugly-slice/
-├── app/          Flutter app (Dart)
-├── shared/       Shared Dart package (Round/Shot/Club models)
-├── supabase/     Supabase migrations and config
-└── CLAUDE.md
+app/          Flutter app (Dart)
+shared/       Shared Dart package (Round/Shot/Club models)
+supabase/     Supabase migrations and config
 ```
-
-## Development Commands
-
-```bash
-# Run
-flutter run                  # debug (defaults to connected device)
-flutter run -d linux         # Linux desktop
-flutter build android        # Android APK
-flutter build ios            # iOS (requires Xcode on macOS)
-
-# Quality
-flutter analyze              # static analysis
-flutter test                 # run tests (test/)
-flutter pub get              # install dependencies
-```
-
 ## Architecture
 
 ### Navigation (bottom tab bar)
@@ -56,17 +38,6 @@ Global singletons in `main.dart`: `db` (AppDatabase), `syncService`, `courseSync
 - **`round_scorecard_page.dart`** — per-round scorecard: Hole/Par/Score/+−/Putts/GIR/FIR/Clubs table
 - **`settings_page.dart`** — WHS handicap card, course rating overrides, seed test data, sign out
 
-### Services (`lib/services/`)
-| File | Purpose |
-|------|---------|
-| `round_repository.dart` | CRUD for rounds (Drift) |
-| `course_repository.dart` | Fetch/cache course geometry |
-| `course_list_repository.dart` | Course list with proximity sort |
-| `course_sync_service.dart` | Sync courses from Overpass API |
-| `sync_service.dart` | Supabase bidirectional sync (syncable package) |
-| `watch_service.dart` | iPhone ↔ Apple Watch bridge (WatchConnectivity, iOS only) |
-| `handicap_service.dart` | WHS Handicap Index calculation |
-
 ### Models
 - **`shared/`**: `HolePlay`, `Shot`, `Club`, `Player` (shared with Watch)
 - **`app/lib/models/`**: `Round`, `Course`, `Hole`, `Tee` (parsed from OSM), `Scorecard`
@@ -74,8 +45,7 @@ Global singletons in `main.dart`: `db` (AppDatabase), `syncService`, `courseSync
 ### Data flow
 1. Course list loaded from a local `assets/*.json` file (todo: file size concern?)
 
-   -  Lazy populate — don't block the UI on sync and let the user see an empty list with a.  should: show nearest courses first. should: show progressively while only partial list returned.
-
+-  Lazy populate — don't block the UI on sync and let the user see an empty list with a.  should: show nearest courses first. should: show progressively while only partial list returned.
 
 2. Detailed course geometry fetched from Overpass API and cached via Drift
 3. Round created locally → synced to Supabase via `syncable` package
@@ -91,28 +61,6 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - iPhone → Watch: hole number, par, distance to pin
 - Watch → iPhone: swing detected (hit event)
 
-## Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `flutter_map` | Interactive map tiles |
-| `latlong2` | Geographic coordinates |
-| `geolocator` | GPS |
-| `drift` / `drift_flutter` | Local SQLite ORM |
-| `syncable` | Supabase bidirectional sync |
-| `supabase_flutter` | Auth + cloud DB |
-| `dart_jts` | Geometric calculations (course boundaries) |
-| `path_provider` | Local file storage |
-| `http` | Overpass API requests |
-
-## Golf Domain Notes
-
-- Scores stored as `shots.length` per `HolePlay` — no separate score field
-- GIR: first shot with `LieType.green` or putter club at index ≤ `par - 2`
-- FIR: `shots[1].lieType == LieType.fairway` for par 4+
-- WHS Handicap: best N of last 20 score differentials × 0.96; estimated (~) when no course rating entered
-- Seed data: 3 Karori rounds (82, 77, 74) with realistic shot positions and GPS trails
-
 ## UI Guidelines
 
 - Material 3, dark theme
@@ -127,7 +75,6 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - Prefer `const` constructors
 - Use `debugPrint` for logging (stripped in release)
 
-
 ## Unit Tests
 
 - All features and key functions should be testable headless (no Flutter app running)
@@ -136,20 +83,15 @@ SwiftUI watch app in `ios/WatchApp/` (4 Swift files). Registered as a companion 
 - Destructive testing: try to crash the logic via invalid inputs, simulated network delays, or concurrent operations
 - Before modifying a feature, write failing unit tests covering edge cases (negative scores, empty input, out-of-range values), then implement until all tests pass
 
-
-
 - unit test: from the point view of a user, without flutter ui, set up different scenarios, and check the result of our logic. i want to freely define/add/custom scenario in the future. I want to separate flutter view from our logic, so the unit test can check the result of core logic. like all numbers presented to the user 
   -- a ViewModel layer — pure Dart classes that hold all  display logic, extracted out of the Flutter widgets. Widgets just render what the VM  exposes.            
 
 
 ## Error Handling
 
-- UI must never crash
-- Use `debugPrint` for logging (stripped in release builds)
-
 ## Backend
 
-A background daemon to keep course data up to date:
+A background daemon work to keep course data up to date:
 
 course data process passes: fetch, parse, enrich
 
@@ -172,6 +114,7 @@ Also check `db.md` and `tee-naming.md`.
 - with royal wellington, 27 holes. overpass json confused our parser. todo: make sure daemon and parser can work with similar complicated courses
 - todo: many 9holes course, a 18hole play means play the 9holes twice. sometimes with different tee or green, sometime sharing. mostlikely sharing fairway. should: reflect this in our data structure?
 - todo: with overpass json, how to remove items that is a driver range or mini golf etc.
+
 
 
 
