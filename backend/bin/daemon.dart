@@ -3,21 +3,12 @@ import 'package:ugly_slice_backend/enricher.dart';
 import 'package:ugly_slice_backend/gemini_client.dart';
 import 'package:ugly_slice_backend/ingest_core.dart';
 import 'package:ugly_slice_backend/scheduler.dart';
+import 'cli.dart' show kRegions;
 
-/// Global regions for discover/ingest jobs.
-/// Each value is a named area passed to [ingestRegion].
-const _regions = [
-  'New Zealand',
-  'Australia',
-  'United States',
-  'United Kingdom',
-  'Canada',
-  'Germany',
-  'France',
-  'Japan',
-  'South Korea',
-  'South Africa',
-];
+/// Regions processed by the daemon's scheduled discover/ingest jobs.
+/// Sourced from the canonical [kRegions] list (cli.dart).
+/// "United States" is intentionally absent — use individual states instead.
+final _regions = kRegions;
 
 Future<void> main(List<String> args) async {
   final dryRun = args.contains('--dry-run');

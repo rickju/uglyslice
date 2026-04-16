@@ -37,14 +37,11 @@ Future<void> main(List<String> args) async {
 
     case 'fetch-region':
     case 'ingest-region': // alias
-      if (args.length < 2) {
-        print('Error: fetch-region requires a region name.');
-        print('  Usage: dart run bin/cli.dart fetch-region "New Zealand" [--limit N]');
-        exit(1);
-      }
+      final regionName = args.length >= 2 ? args[1] : await _pickRegion();
+      if (regionName == null) exit(1);
       final limitArg = args.indexOf('--limit');
       final limit = limitArg != -1 ? int.tryParse(args[limitArg + 1]) : null;
-      await ingestRegion(args[1], limit: limit);
+      await ingestRegion(regionName, limit: limit);
 
     // ── Stage 2: Cache ─────────────────────────────────────────────────────────
 
@@ -312,6 +309,136 @@ Future<String?> _pickCourseName() async {
     _saveRecent(result);
     print('Selected: $result');
   }
+  return result;
+}
+
+// ── Region picker ─────────────────────────────────────────────────────────────
+
+/// Canonical region list for fetch-region / daemon.
+/// "United States" is omitted — too large for a single Overpass query.
+/// Use individual US states instead.
+const kRegions = [
+  // Countries / territories
+  'New Zealand',
+  'Australia',
+  'United Kingdom',
+  'Ireland',
+  'Canada',
+  'Germany',
+  'France',
+  'Spain',
+  'Italy',
+  'Netherlands',
+  'Sweden',
+  'Denmark',
+  'Norway',
+  'Finland',
+  'Japan',
+  'South Korea',
+  'South Africa',
+  // US states (alphabetical)
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California',
+  'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia',
+  'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+  'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland',
+  'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri',
+  'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey',
+  'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio',
+  'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina',
+  'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont',
+  'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+];
+
+/// Interactive fuzzy picker over [kRegions].
+/// Returns the selected region name, or null if cancelled / non-terminal.
+Future<String?> _pickRegion() async {
+  if (!stdin.hasTerminal) return null;
+
+  const maxShow = 12;
+
+  List<String> filter(String q) {
+    if (q.isEmpty) return kRegions.take(maxShow).toList();
+    final lower = q.toLowerCase();
+    return kRegions
+        .where((r) => r.toLowerCase().contains(lower))
+        .take(maxShow)
+        .toList();
+  }
+
+  stdin.echoMode = false;
+  stdin.lineMode = false;
+
+  var query = '';
+  var selectedIdx = 0;
+  var printedLines = 0;
+
+  void clearPrinted() {
+    for (var i = 0; i < printedLines; i++) stdout.write('\x1b[1A\x1b[2K');
+    printedLines = 0;
+  }
+
+  void render(List<String> matches) {
+    clearPrinted();
+    stdout.write(
+        'Region: $query  \x1b[2m[${kRegions.length} regions · type to filter]\x1b[0m\n');
+    var lines = 1;
+    if (matches.isEmpty) {
+      stdout.write('  \x1b[2m(no matches)\x1b[0m\n');
+      lines++;
+    }
+    for (var i = 0; i < matches.length; i++) {
+      if (i == selectedIdx) {
+        stdout.write('\x1b[32m>  ${matches[i]}\x1b[0m\n');
+      } else {
+        stdout.write('   ${matches[i]}\n');
+      }
+      lines++;
+    }
+    printedLines = lines;
+  }
+
+  var matches = filter(query);
+  render(matches);
+
+  String? result;
+  while (true) {
+    final byte = stdin.readByteSync();
+    if (byte == -1) break;
+
+    if (byte == 0x1b) {
+      final b2 = stdin.readByteSync();
+      if (b2 == 0x5b) {
+        final b3 = stdin.readByteSync();
+        if (b3 == 0x41 && selectedIdx > 0) selectedIdx--;
+        if (b3 == 0x42 && selectedIdx < matches.length - 1) selectedIdx++;
+      }
+    } else if (byte == 0x0d || byte == 0x0a) {
+      if (matches.isNotEmpty) result = matches[selectedIdx];
+      break;
+    } else if (byte == 0x7f || byte == 0x08) {
+      if (query.isNotEmpty) {
+        query = query.substring(0, query.length - 1);
+        selectedIdx = 0;
+      }
+    } else if (byte == 0x03) {
+      break;
+    } else if (byte >= 0x20 && byte < 0x7f) {
+      query += String.fromCharCode(byte);
+      selectedIdx = 0;
+    }
+
+    matches = filter(query);
+    if (selectedIdx >= matches.length) {
+      selectedIdx = matches.isEmpty ? 0 : matches.length - 1;
+    }
+    render(matches);
+  }
+
+  stdin.echoMode = true;
+  stdin.lineMode = true;
+  clearPrinted();
+
+  if (result != null) print('Selected: $result');
   return result;
 }
 
