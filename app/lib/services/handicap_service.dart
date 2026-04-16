@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
+import '_docs_dir_stub.dart'
+    if (dart.library.ui) '_docs_dir_flutter.dart';
 
 // ── Result ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ class CourseRatingStore {
   }
 
   static Future<File> _file() async {
-    final dir = await getApplicationDocumentsDirectory();
+    final dir = await getDocsDir();
     return File('${dir.path}/course_ratings.json');
   }
 }
